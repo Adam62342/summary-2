@@ -200,8 +200,8 @@
 #pgs-panel .pgs-dots i:nth-child(2) { animation-delay: 0.16s; }
 #pgs-panel .pgs-dots i:nth-child(3) { animation-delay: 0.32s; }
 @keyframes pgs-bounce { 0%, 75%, 100% { opacity: 0.3; transform: translateY(0); } 38% { opacity: 0.95; transform: translateY(-4px); } }
-/* each freshly-streamed slice eases in (overlapping slices make a smooth wave, not a pop) */
-#pgs-panel .pgs-chunk-in { animation: pgs-chunk 0.55s var(--pgs-ease) both; }
+/* a few lines pile up, then ease in together as one smooth block */
+#pgs-panel .pgs-chunk-in { animation: pgs-chunk 0.65s var(--pgs-ease) both; }
 @keyframes pgs-chunk { from { opacity: 0; filter: blur(1px); } to { opacity: 1; filter: blur(0); } }
 #pgs-panel .pgs-mini {
   appearance: none; background: transparent; color: inherit; border: none; cursor: pointer;
@@ -1228,14 +1228,26 @@
       const wantTs = /\btimestamp|\bmoment|\bchapter|time ?code|mm:ss|\bjump to\b/i.test(convo.at(-1)?.content || "");
       const clean = (t) => (page?.youtube && seek ? scrubStamps(t, page.seconds, wantTs) : t);
       const dropDots = () => { if (dots) { dots.remove(); dots = null; } };
-      // repaint on a chunk cadence (not per token) so text fades in by the chunk, not per letter
+      // Reveal the answer in whole multi-line chunks: hold streamed text back until ~3 lines have
+      // piled up, then render up to `end` and ease the new block in together (settled text stays
+      // solid). This reads as "a few lines appear and smoothly fade in" rather than a live crawl.
+      const CHUNK_LINES = 3;
       let shown = 0, lastPaint = 0;
-      const paint = () => {
+      const paint = (end = acc.length) => {
+        if (end <= shown) return;
         dropDots();
         const stick = nearBottom();
-        renderMd(answerEl, acc, seek, shown); // only lines past `shown` animate in
-        shown = acc.length;
+        renderMd(answerEl, acc.slice(0, end), seek, shown); // text past `shown` fades in as one chunk
+        shown = end;
         if (stick) scrollDown(false);
+      };
+      // index just past the CHUNK_LINES-th newline after what's already shown (-1 if not enough yet)
+      const chunkEnd = () => {
+        let n = 0;
+        for (let i = shown; i < acc.length; i++) {
+          if (acc[i] === "\n" && ++n >= CHUNK_LINES) return i + 1;
+        }
+        return -1;
       };
       try {
         if (!llmReady()) {
@@ -1247,9 +1259,12 @@
           for await (const d of streamLLM(requestFor(), signal)) {
             acc = acc.length > 20 && d.startsWith(acc) ? d : acc + d; // tolerate cumulative streams
             const now = Date.now();
-            if (now - lastPaint >= 80) { lastPaint = now; paint(); }
+            const end = chunkEnd();
+            if (end > 0) { lastPaint = now; paint(end); } // a full ~3-line chunk is ready
+            else if (acc.length - shown >= 500) { lastPaint = now; paint(); } // one very long line
+            else if (acc.length > shown && now - lastPaint >= 1800) { lastPaint = now; paint(); } // slow model, show life
           }
-          paint(); // flush the buffered tail (fades the last chunk in)
+          paint(); // flush the trailing partial chunk
           const cleaned = clean(acc); // drop any timestamps invented past the end of the video
           if (cleaned !== acc) { acc = cleaned; renderMd(answerEl, acc, seek); }
           else acc = cleaned;
@@ -1588,5 +1603,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.20");
+  console.log("[page-summary] loaded v1.9.21");
 })();
