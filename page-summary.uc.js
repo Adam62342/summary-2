@@ -431,18 +431,11 @@
   // API returns 400, but YouTube's own "Show transcript" panel still works because the page mints a
   // valid token itself. So we open that panel and read the rendered segments straight from the DOM.
   function extractYouTubeTranscript() {
-    const doc = content.document;
     const send = (d) => sendAsyncMessage("page-summary:text", d);
+    const win = content.wrappedJSObject;       // the page's real window/DOM — bypasses the Xray
+    const pdoc = win.document;                 //   wrapper that hides custom-element contents
     const sleep = (ms) => new Promise((r) => content.setTimeout(r, ms));
-    // YouTube's buttons are Polymer; a bare .click() can miss its tap handler, so fire the full set
-    const fire = (el) => {
-      try { el.click(); } catch (e) {}
-      try {
-        for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-          el.dispatchEvent(new content.MouseEvent(type, { bubbles: true, cancelable: true, view: content }));
-        }
-      } catch (e) {}
-    };
+    const toArr = (nl) => { const a = []; if (nl) for (let i = 0; i < nl.length; i++) a.push(nl[i]); return a; };
     const toMs = (txt) => {
       const p = (txt || "").trim().split(":").map(Number);
       if (!p.length || p.some((n) => isNaN(n))) return 0;
@@ -451,16 +444,17 @@
     };
     let hostCount = 0;
     const readSegs = () => {
-      const hosts = doc.querySelectorAll("ytd-transcript-segment-renderer");
+      const hosts = toArr(pdoc.querySelectorAll("ytd-transcript-segment-renderer"));
       hostCount = hosts.length;
       const out = [];
       for (const n of hosts) {
-        let ts = ((n.querySelector(".segment-timestamp") || {}).textContent || "").trim();
-        let raw = ((n.querySelector(".segment-text") || {}).textContent || "").replace(/\s+/g, " ").trim();
+        const tsEl = n.querySelector(".segment-timestamp");
+        const txEl = n.querySelector(".segment-text");
+        let ts = ((tsEl && tsEl.textContent) || "").trim();
+        let raw = ((txEl && txEl.textContent) || "").replace(/\s+/g, " ").trim();
         if (!raw) {
-          // class names may have changed / moved into shadow DOM — fall back to the whole row
-          raw = (n.textContent || "").replace(/\s+/g, " ").trim();
-          if (!raw && n.openOrClosedShadowRoot) raw = (n.openOrClosedShadowRoot.textContent || "").replace(/\s+/g, " ").trim();
+          // class names may have changed — fall back to the whole row and split off the timestamp
+          raw = ((n.innerText || n.textContent) || "").replace(/\s+/g, " ").trim();
           const m = raw.match(/^(\d{1,2}:\d{2}(?::\d{2})?)\s+([\s\S]+)$/);
           if (m) { ts = ts || m[1]; raw = m[2]; }
         }
@@ -469,28 +463,26 @@
       }
       return out;
     };
-    // find the "Show transcript" button WITHOUT relying on English text (the user's UI may be in
-    // any language) — prefer the structural location in the description's transcript section
+    // find the "Show transcript" button WITHOUT relying on English text — prefer the structural
+    // location in the description's transcript section (language-independent)
     const findBtn = () => {
-      const sect = doc.querySelector(
-        "ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer ytd-button-renderer"
-      );
-      if (sect) return sect;
-      const en = doc.querySelector('button[aria-label*="transcript" i]');
-      if (en) return en;
-      const words = ["transcript", "přepis", "文字起こし", "トランスクリプト", "transcripción", "transcription", "transkript", "stenogram", "字幕記録"];
-      for (const b of doc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button, a")) {
-        const t = ((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")).toLowerCase();
-        if (words.some((w) => t.includes(w))) return b;
+      let b = pdoc.querySelector("ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer ytd-button-renderer");
+      if (b) return b;
+      b = pdoc.querySelector('button[aria-label*="transcript" i]');
+      if (b) return b;
+      const words = ["transcript", "přepis", "文字起こし", "トランスクリプト", "transcripción", "transcription", "transkript", "stenogram"];
+      for (const el of toArr(pdoc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button, a"))) {
+        const t = (((el.getAttribute && el.getAttribute("aria-label")) || "") + " " + (el.textContent || "")).toLowerCase();
+        if (words.some((w) => t.includes(w))) return el;
       }
       return null;
     };
 
     (async () => {
-      const info = { youtube: true, url: doc.location.href, title: doc.title.replace(/\s*[-–—]\s*YouTube\s*$/, "") };
+      const info = { youtube: true, url: pdoc.location.href, title: (pdoc.title || "").replace(/\s*[-–—]\s*YouTube\s*$/, "") };
       try {
         try {
-          const vd = (content.wrappedJSObject.ytInitialPlayerResponse || {}).videoDetails || {};
+          const vd = (win.ytInitialPlayerResponse || {}).videoDetails || {};
           if (vd.title) info.title = vd.title;
           info.author = vd.author || "";
           info.seconds = +vd.lengthSeconds || 0;
@@ -499,19 +491,19 @@
         let segs = readSegs();
         if (!segs.length) {
           // expand the description so its transcript section renders, then wait for the button
-          const expand = doc.querySelector("#description #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand");
-          if (expand) fire(expand);
+          const expand = pdoc.querySelector("#description #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand");
+          if (expand) { try { expand.click(); } catch (e) {} }
           let btn = null;
           for (let i = 0; i < 20 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
           info.foundButton = !!btn;
           if (btn) {
-            fire(btn);
+            try { btn.click(); } catch (e) {}
             for (let i = 0; i < 48 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
             // tidy up: close the panel we opened
             try {
-              const panel = doc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
+              const panel = pdoc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
               const close = panel && panel.querySelector('button[aria-label*="Close" i], button[aria-label*="Zavřít" i], button[aria-label*="閉じる"]');
-              if (close) fire(close);
+              if (close) { try { close.click(); } catch (e) {} }
             } catch (e) {}
           }
         }
@@ -1454,5 +1446,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.11");
+  console.log("[page-summary] loaded v1.9.12");
 })();
