@@ -263,21 +263,21 @@
   margin: 2px 0 6px;
 }
 #pgs-panel .pgs-stack[hidden] { display: none; }
-/* Collapsed: cards are pulled onto one another (negative margins) into a single pile. The front
-   card (first in the DOM, newest context) sits flat and solid on top; the ones behind it are
-   nudged up-and-left, tilted, shrunk and dimmed so their edges clearly poke out — the layered,
-   task-switcher look from IMG_0034. On hover the negative margins open up to real gaps, sliding
-   every card into its own row (so the cards behind can never stay hidden). */
+/* Collapsed: cards are pulled onto one another (negative margins) into a fanned pile. The front
+   card (first in the DOM, newest context) sits flat and solid on top; each card behind pivots from
+   its bottom-left corner so its right side lifts up and peeks above the front card — a visible fan,
+   even without hovering. On hover the negative margins open to real gaps, sliding every card into
+   its own row (so the cards behind can never stay hidden). */
 #pgs-panel .pgs-stack-card {
   box-sizing: border-box; height: var(--pgs-h);
   margin-top: calc(-1 * var(--pgs-h));
   z-index: calc(100 - var(--pgs-i, 0));
-  transform-origin: 50% 100%;
+  transform-origin: 0% 100%;
   transform:
-    translate(calc(var(--pgs-i, 0) * -11px), calc(var(--pgs-i, 0) * -7px))
+    translateY(calc(var(--pgs-i, 0) * -4px))
     rotate(var(--pgs-rot, 0deg))
-    scale(calc(1 - var(--pgs-i, 0) * 0.05));
-  opacity: calc(1 - var(--pgs-i, 0) * 0.16);
+    scale(calc(1 - var(--pgs-i, 0) * 0.04));
+  opacity: calc(1 - var(--pgs-i, 0) * 0.12);
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
   transition: margin-top 0.42s var(--pgs-ease), transform 0.42s var(--pgs-ease),
     opacity 0.38s ease, box-shadow 0.3s ease;
