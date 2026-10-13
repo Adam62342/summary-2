@@ -471,12 +471,13 @@
     };
     let hostCount = 0;
     const readSegs = () => {
-      const hosts = toArr(pdoc.querySelectorAll("ytd-transcript-segment-renderer"));
+      let hosts = toArr(pdoc.querySelectorAll("ytd-transcript-segment-renderer, yt-transcript-segment-renderer"));
+      if (!hosts.length) hosts = toArr(pdoc.querySelectorAll("[class*='transcript-segment-renderer'], [class*='transcript-segment']"));
       hostCount = hosts.length;
       const out = [];
       for (const n of hosts) {
-        const tsEl = n.querySelector(".segment-timestamp");
-        const txEl = n.querySelector(".segment-text");
+        const tsEl = n.querySelector(".segment-timestamp, [class*='timestamp']");
+        const txEl = n.querySelector(".segment-text, [class*='segment-text']");
         let ts = ((tsEl && tsEl.textContent) || "").trim();
         let raw = ((txEl && txEl.textContent) || "").replace(/\s+/g, " ").trim();
         if (!raw) {
@@ -491,18 +492,41 @@
       return out;
     };
     // find the "Show transcript" button WITHOUT relying on English text — prefer the structural
-    // location in the description's transcript section (language-independent)
+    // location (description's transcript section), then fall back to a language-independent scan
+    // of button/link/menu labels (covers the ⋯ actions-menu item on newer layouts)
+    const WORDS = ["transcript", "přepis", "prepis", "transkript", "stenogram", "transcripción", "transcription", "trascrizione", "transkription", "文字起こし", "トランスクリプト", "字幕", "자막", "트랜스크립트", "расшифровка", "стенограма"];
+    const hasWord = (el) => {
+      const t = (((el.getAttribute && el.getAttribute("aria-label")) || "") + " " + (el.textContent || "")).toLowerCase();
+      return WORDS.some((w) => t.includes(w));
+    };
     const findBtn = () => {
-      let b = pdoc.querySelector("ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer ytd-button-renderer");
-      if (b) return b;
-      b = pdoc.querySelector('button[aria-label*="transcript" i]');
-      if (b) return b;
-      const words = ["transcript", "přepis", "文字起こし", "トランスクリプト", "transcripción", "transcription", "transkript", "stenogram"];
-      for (const el of toArr(pdoc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button, a"))) {
-        const t = (((el.getAttribute && el.getAttribute("aria-label")) || "") + " " + (el.textContent || "")).toLowerCase();
-        if (words.some((w) => t.includes(w))) return el;
+      for (const s of [
+        "ytd-video-description-transcript-section-renderer button",
+        "ytd-video-description-transcript-section-renderer ytd-button-renderer",
+        "[class*='transcript-section'] button",
+        'button[aria-label*="transcript" i]',
+        'button[aria-label*="přepis" i]',
+      ]) { const b = pdoc.querySelector(s); if (b) return b; }
+      for (const el of toArr(pdoc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button, ytd-button-renderer, a, ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model"))) {
+        if (hasWord(el)) return el;
       }
       return null;
+    };
+    // open the ⋯ "More actions" menu (next to Like/Share) so its "Show transcript" item renders
+    const openMoreMenu = () => {
+      for (const s of [
+        'ytd-watch-metadata #actions ytd-menu-renderer button[aria-label*="More actions" i]',
+        'button[aria-label*="More actions" i]',
+        'button[aria-label*="Další akce" i]',
+        'button[aria-label*="その他の操作" i]',
+        'button[aria-label*="더보기" i]',
+        'ytd-watch-metadata ytd-menu-renderer yt-icon-button',
+        '#actions ytd-menu-renderer #button',
+      ]) {
+        const mb = pdoc.querySelector(s);
+        if (mb) { try { (mb.tagName === "BUTTON" ? mb : (mb.querySelector && mb.querySelector("button")) || mb).click(); } catch (e) {} return true; }
+      }
+      return false;
     };
 
     (async () => {
@@ -521,16 +545,21 @@
           // "…more"/"…více" expander so we don't accidentally hit a comment's expander)
           for (const sel of ["ytd-watch-metadata #expand", "#description #expand", "#description-inline-expander #expand", "ytd-text-inline-expander #expand", "tp-yt-paper-button#expand"]) {
             const ex = pdoc.querySelector(sel);
-            if (ex) { try { ex.click(); } catch (e) {} break; }
+            if (ex) { try { ex.click(); } catch (e) {} info.expanded = true; break; }
           }
           // wait for the transcript button to render, then click the actual <button> inside it
           let btn = null;
-          for (let i = 0; i < 28 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
+          for (let i = 0; i < 20 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
+          // newer layouts hide "Show transcript" behind the ⋯ actions menu instead of the description
+          if (!btn) {
+            info.triedMenu = openMoreMenu();
+            for (let i = 0; i < 16 && !btn; i++) { await sleep(200); btn = findBtn(); }
+          }
           info.foundButton = !!btn;
           if (btn) {
             const c = btn.tagName === "BUTTON" ? btn : (btn.querySelector && btn.querySelector("button")) || btn;
             try { c.click(); } catch (e) {}
-            for (let i = 0; i < 48 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
+            for (let i = 0; i < 40 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
             // tidy up: close the panel we opened
             try {
               const panel = pdoc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
@@ -558,7 +587,7 @@
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, noPanel: data?.noPanel, error: data?.error });
+    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, expanded: data?.expanded, triedMenu: data?.triedMenu, noPanel: data?.noPanel, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
@@ -1603,5 +1632,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.21");
+  console.log("[page-summary] loaded v1.9.22");
 })();
