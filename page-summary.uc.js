@@ -257,8 +257,8 @@
 /* ----- whimsical attachment stack: page card + selected-text snippets ----- */
 /* A tidy pile of rotated cards that fans open into a straight, readable column on hover. */
 #pgs-panel .pgs-stack {
-  display: flex; flex-direction: column; align-items: stretch;
-  --pgs-h: 54px; --pgs-gap: 9px;
+  display: flex; flex-direction: column; align-items: flex-start;
+  --pgs-h: 54px; --pgs-gap: 9px; --pgs-w: 210px;
   width: 100%;
   margin: 2px 0 6px;
 }
@@ -269,7 +269,7 @@
    task-switcher look from IMG_0034. On hover the negative margins open up to real gaps, sliding
    every card into its own row (so the cards behind can never stay hidden). */
 #pgs-panel .pgs-stack-card {
-  box-sizing: border-box; width: 100%; height: var(--pgs-h);
+  box-sizing: border-box; height: var(--pgs-h);
   margin-top: calc(-1 * var(--pgs-h));
   z-index: calc(100 - var(--pgs-i, 0));
   transform-origin: 50% 100%;
@@ -284,10 +284,10 @@
   animation: pgs-msg 0.35s var(--pgs-ease) both;
 }
 #pgs-panel .pgs-stack-card:first-child { margin-top: 0; }
-/* opaque, bordered cards so the pile reads as stacked paper (both card types) */
+/* a compact card hugging the left of the field (both card types) */
 #pgs-panel .pgs-stack .pgs-card.pgs-attached,
 #pgs-panel .pgs-stack .pgs-ref {
-  width: 100%; max-width: 100%;
+  width: var(--pgs-w); max-width: calc(100% - 6px);
   background: color-mix(in srgb, var(--pgs-bg) 90%, var(--pgs-fg));
   border: 1px solid var(--pgs-line); border-radius: 14px;
 }
