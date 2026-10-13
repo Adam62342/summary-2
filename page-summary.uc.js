@@ -257,31 +257,33 @@
 /* ----- whimsical attachment stack: page card + selected-text snippets ----- */
 /* A tidy pile of rotated cards that fans open into a straight, readable column on hover. */
 #pgs-panel .pgs-stack {
-  position: relative;
-  --pgs-h: 54px; --pgs-gap: 8px; --pgs-n: 1;
+  display: flex; flex-direction: column; align-items: stretch;
+  --pgs-h: 54px; --pgs-gap: 9px;
   width: 100%;
-  height: var(--pgs-h);
   margin: 2px 0 6px;
-  transition: height 0.42s var(--pgs-ease);
 }
 #pgs-panel .pgs-stack[hidden] { display: none; }
-/* collapsed pile: the front card (--pgs-i 0, newest context) sits flat and sharp;
-   the ones behind it are nudged up-and-left, tilted, shrunk and dimmed — the layered,
-   task-switcher depth from IMG_0034. */
+/* Collapsed: cards are pulled onto one another (negative margins) into a single pile. The front
+   card (first in the DOM, newest context) sits flat and solid on top; the ones behind it are
+   nudged up-and-left, tilted, shrunk and dimmed so their edges clearly poke out — the layered,
+   task-switcher look from IMG_0034. On hover the negative margins open up to real gaps, sliding
+   every card into its own row (so the cards behind can never stay hidden). */
 #pgs-panel .pgs-stack-card {
-  position: absolute; left: 0; right: 0; top: 0; margin: 0;
-  box-sizing: border-box; height: var(--pgs-h);
+  box-sizing: border-box; width: 100%; height: var(--pgs-h);
+  margin-top: calc(-1 * var(--pgs-h));
   z-index: calc(100 - var(--pgs-i, 0));
   transform-origin: 50% 100%;
   transform:
-    translate(calc(var(--pgs-i, 0) * -9px), calc(var(--pgs-i, 0) * -5px))
+    translate(calc(var(--pgs-i, 0) * -11px), calc(var(--pgs-i, 0) * -7px))
     rotate(var(--pgs-rot, 0deg))
     scale(calc(1 - var(--pgs-i, 0) * 0.05));
-  opacity: calc(1 - var(--pgs-i, 0) * 0.14);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
-  transition: transform 0.44s var(--pgs-ease), opacity 0.4s ease, box-shadow 0.3s ease;
+  opacity: calc(1 - var(--pgs-i, 0) * 0.16);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
+  transition: margin-top 0.42s var(--pgs-ease), transform 0.42s var(--pgs-ease),
+    opacity 0.38s ease, box-shadow 0.3s ease;
   animation: pgs-msg 0.35s var(--pgs-ease) both;
 }
+#pgs-panel .pgs-stack-card:first-child { margin-top: 0; }
 /* opaque, bordered cards so the pile reads as stacked paper (both card types) */
 #pgs-panel .pgs-stack .pgs-card.pgs-attached,
 #pgs-panel .pgs-stack .pgs-ref {
@@ -291,15 +293,13 @@
 }
 #pgs-panel .pgs-stack .pgs-card.pgs-attached { padding: 7px 14px 7px 7px; }
 #pgs-panel .pgs-stack .pgs-ref { padding: 7px 30px 7px 7px; }
-/* hover the pile: every context fans into its own row, straightened and fully opaque */
-#pgs-panel .pgs-stack:hover {
-  height: calc(var(--pgs-n) * (var(--pgs-h) + var(--pgs-gap)) - var(--pgs-gap));
-}
+/* hover the pile: open the gaps, straighten and solidify every card into its own row */
 #pgs-panel .pgs-stack:hover .pgs-stack-card {
-  transform: translateY(calc(var(--pgs-i, 0) * (var(--pgs-h) + var(--pgs-gap)))) rotate(0deg) scale(1);
-  opacity: 1;
+  margin-top: var(--pgs-gap);
+  transform: none; opacity: 1;
   box-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
 }
+#pgs-panel .pgs-stack:hover .pgs-stack-card:first-child { margin-top: 0; }
 
 /* magnetic corner snap */
 #pgs-panel.pgs-snapping {
@@ -735,12 +735,11 @@
         pc.classList.add("pgs-stack-card");
         cards.push(pc);
       }
-      // front card sits flat; each card further back leans a touch more (a neat, fanned deck)
+      // front card sits flat; each card further back leans a touch more to the left (fanned deck)
       cards.forEach((card, i) => {
-        card.style.setProperty("--pgs-i", i);
-        card.style.setProperty("--pgs-rot", (i === 0 ? 0 : -(2 + i * 1.5)).toFixed(2) + "deg");
+        card.style.setProperty("--pgs-i", String(i));
+        card.style.setProperty("--pgs-rot", (i === 0 ? 0 : -(4 + i * 2)).toFixed(2) + "deg");
       });
-      stackEl.style.setProperty("--pgs-n", cards.length || 1);
       stackEl.replaceChildren(...cards);
       stackEl.hidden = !cards.length;
     }
