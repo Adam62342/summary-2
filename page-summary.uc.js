@@ -190,6 +190,19 @@
 @keyframes pgs-blink { 50% { opacity: 0; } }
 #pgs-panel .pgs-actions { display: flex; gap: 6px; margin-top: 4px; animation: pgs-fade 0.4s ease both; }
 @keyframes pgs-fade { from { opacity: 0; } to { opacity: 1; } }
+/* "thinking" dots shown before the first token streams in */
+#pgs-panel .pgs-dots { display: inline-flex; gap: 5px; align-items: center; padding: 3px 0 1px; }
+#pgs-panel .pgs-dots i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: color-mix(in srgb, var(--pgs-fg) 50%, transparent);
+  animation: pgs-bounce 1.25s ease-in-out infinite;
+}
+#pgs-panel .pgs-dots i:nth-child(2) { animation-delay: 0.16s; }
+#pgs-panel .pgs-dots i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes pgs-bounce { 0%, 75%, 100% { opacity: 0.3; transform: translateY(0); } 38% { opacity: 0.95; transform: translateY(-4px); } }
+/* each streamed chunk fades in instead of appearing letter-by-letter */
+#pgs-panel .pgs-chunk-in { animation: pgs-chunk 0.4s var(--pgs-ease) both; }
+@keyframes pgs-chunk { from { opacity: 0; filter: blur(1.5px); } to { opacity: 1; filter: blur(0); } }
 #pgs-panel .pgs-mini {
   appearance: none; background: transparent; color: inherit; border: none; cursor: pointer;
   font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 7px; opacity: 0.5;
@@ -841,10 +854,13 @@
       return out;
     });
 
-  function renderMd(el, text, seek) {
+  function renderMd(el, text, seek, fadeStart = Infinity) {
     el.replaceChildren();
-    let list = null, kind = null;
+    let list = null, kind = null, off = 0;
     for (const raw of text.split("\n")) {
+      const start = off;
+      off += raw.length + 1; // +1 for the "\n" we split on
+      const fresh = start >= fadeStart; // only animate lines that arrived this flush
       const line = raw.trim();
       const ul = line.match(/^[-*•]\s+(.*)/);
       const ol = line.match(/^\d+[.)]\s+(.*)/);
@@ -852,13 +868,13 @@
       if (ul || ol) {
         const tag = ul ? "ul" : "ol";
         if (!list || kind !== tag) { list = h(tag); kind = tag; el.append(list); }
-        list.append(h("li", {}, ...inline((ul || ol)[1], seek)));
+        list.append(h("li", fresh ? { className: "pgs-chunk-in" } : {}, ...inline((ul || ol)[1], seek)));
       } else if (hd) {
         list = null;
-        el.append(h("p", { className: "pgs-h" }, ...inline(hd[1], seek)));
+        el.append(h("p", { className: "pgs-h" + (fresh ? " pgs-chunk-in" : "") }, ...inline(hd[1], seek)));
       } else if (line) {
         list = null;
-        el.append(h("p", {}, ...inline(line, seek)));
+        el.append(h("p", fresh ? { className: "pgs-chunk-in" } : {}, ...inline(line, seek)));
       } else {
         list = null;
       }
@@ -1190,7 +1206,8 @@
       setBusy(true);
       const block = h("div", { className: "pgs-msg pgs-ai pgs-streaming" });
       const answerEl = h("div", { className: "pgs-answer" });
-      block.append(answerEl);
+      let dots = h("div", { className: "pgs-dots" }, h("i"), h("i"), h("i")); // "thinking" until first token
+      block.append(answerEl, dots);
       logEl.append(block);
       scrollDown(true);
       let acc = "";
@@ -1199,23 +1216,36 @@
       // did this request actually ask for timestamps? (mirrors the context stripping in requestFor)
       const wantTs = /\btimestamp|\bmoment|\bchapter|time ?code|mm:ss|\bjump to\b/i.test(convo.at(-1)?.content || "");
       const clean = (t) => (page?.youtube && seek ? scrubStamps(t, page.seconds, wantTs) : t);
+      const dropDots = () => { if (dots) { dots.remove(); dots = null; } };
+      // repaint on a chunk cadence (not per token) so text fades in by the chunk, not per letter
+      let shown = 0, lastPaint = 0;
+      const paint = () => {
+        dropDots();
+        const stick = nearBottom();
+        renderMd(answerEl, acc, seek, shown); // only lines past `shown` animate in
+        shown = acc.length;
+        if (stick) scrollDown(false);
+      };
       try {
         if (!llmReady()) {
+          dropDots();
           acc = extractive(page.text) || "Couldn't find enough text on this page to summarize.";
           renderMd(answerEl, acc, seek);
           answerEl.append(h("div", { className: "pgs-note", textContent: "Offline summary. Add an API key (or a local model) in the mod settings for AI answers." }));
         } else {
           for await (const d of streamLLM(requestFor(), signal)) {
-            const stick = nearBottom();
             acc = acc.length > 20 && d.startsWith(acc) ? d : acc + d; // tolerate cumulative streams
-            renderMd(answerEl, acc, seek);
-            if (stick) scrollDown(false);
+            const now = Date.now();
+            if (now - lastPaint >= 80) { lastPaint = now; paint(); }
           }
-          acc = clean(acc); // drop any timestamps the model invented past the end of the video
-          renderMd(answerEl, acc, seek);
+          paint(); // flush the buffered tail (fades the last chunk in)
+          const cleaned = clean(acc); // drop any timestamps invented past the end of the video
+          if (cleaned !== acc) { acc = cleaned; renderMd(answerEl, acc, seek); }
+          else acc = cleaned;
         }
         if (acc) convo.push({ role: "assistant", content: acc });
       } catch (e) {
+        dropDots();
         if (e.name === "AbortError") {
           if (stopped && acc) convo.push({ role: "assistant", content: acc }); // keep what was written
         } else {
@@ -1547,5 +1577,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.18");
+  console.log("[page-summary] loaded v1.9.19");
 })();
