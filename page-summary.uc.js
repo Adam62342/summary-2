@@ -515,19 +515,27 @@
   // It returns the transcript as data, not a gated caption file, so it survives the token-gating.
   async function getTranscriptPanel(id, html, signal) {
     const key = (html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1] || "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w";
-    const cver = (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20240101.00.00";
+    // use YouTube's own request context (client version, visitorData, …) verbatim — a 400 from
+    // get_transcript almost always means a hand-built context is missing one of these fields
+    const ctx = ytJson(html, '"INNERTUBE_CONTEXT":');
+    const cver = ctx?.client?.clientVersion || (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20240101.00.00";
     const params = (html.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
-    console.log("[page-summary] yt get_transcript", { paramsFound: !!params, clientVersion: cver });
-    if (!params) return null;
+    console.log("[page-summary] yt get_transcript", { paramsFound: !!params, haveContext: !!ctx, clientVersion: cver });
+    if (!params || !ctx) return null;
     let data;
     try {
       const r = await fetch(`https://www.youtube.com/youtubei/v1/get_transcript?key=${key}&prettyPrint=false`, {
         method: "POST", signal, credentials: "include",
-        headers: { "content-type": "application/json", "x-youtube-client-name": "1", "x-youtube-client-version": cver },
-        body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: cver, hl: "en" } }, params }),
+        headers: {
+          "content-type": "application/json",
+          "x-youtube-client-name": "1",
+          "x-youtube-client-version": cver,
+          ...(ctx.client?.visitorData ? { "x-goog-visitor-id": ctx.client.visitorData } : {}),
+        },
+        body: JSON.stringify({ context: ctx, params }),
       });
       if (!r.ok) { console.warn("[page-summary] get_transcript HTTP", r.status); return null; }
-      data = await r.json();
+      data = JSON.parse(await r.text());
     } catch (e) { console.warn("[page-summary] get_transcript error", e); return null; }
     const out = [];
     (function walk(o) {
@@ -1508,5 +1516,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.3");
+  console.log("[page-summary] loaded v1.9.4");
 })();
