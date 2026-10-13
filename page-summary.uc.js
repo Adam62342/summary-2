@@ -27,7 +27,7 @@
   // shown instead of CHIPS when the panel is open on a YouTube video
   const YT_CHIPS = [
     ["Summarize", "Summarize this video into concise bullet points."],
-    ["Key moments", "List the key moments of this video as bullet points. Begin each with its [mm:ss] timestamp."],
+    ["Key moments", "List the key moments as bullet points. Begin each bullet with its [mm:ss] timestamp, then a short, plain one-line description. Bold at most one key term per bullet."],
     ["Takeaways", "What are the main takeaways from this video?"],
     ["TL;DR", "Give a two-sentence TL;DR of this video."],
   ];
@@ -125,10 +125,14 @@
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
   to   { opacity: 1; transform: none; }
 }
-#pgs-panel .pgs-msg p { margin: 0 0 8px; }
-#pgs-panel .pgs-msg ul, #pgs-panel .pgs-msg ol { margin: 0 0 6px; padding-inline-start: 22px; }
-#pgs-panel .pgs-msg li { margin: 0 0 8px; padding-inline-start: 2px; }
-#pgs-panel .pgs-msg li::marker { color: color-mix(in srgb, var(--pgs-fg) 45%, transparent); }
+#pgs-panel .pgs-answer { line-height: 1.5; }
+#pgs-panel .pgs-msg p { margin: 0 0 10px; }
+#pgs-panel .pgs-msg p:last-child { margin-bottom: 0; }
+#pgs-panel .pgs-msg ul, #pgs-panel .pgs-msg ol { margin: 0 0 8px; padding-inline-start: 20px; }
+#pgs-panel .pgs-msg ul:last-child, #pgs-panel .pgs-msg ol:last-child { margin-bottom: 0; }
+#pgs-panel .pgs-msg li { margin: 0 0 9px; padding-inline-start: 3px; line-height: 1.5; }
+#pgs-panel .pgs-msg li:last-child { margin-bottom: 0; }
+#pgs-panel .pgs-msg li::marker { color: color-mix(in srgb, var(--pgs-fg) 40%, transparent); }
 
 #pgs-panel .pgs-ug {
   align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
@@ -248,9 +252,15 @@
 /* stop button + inline bits */
 #pgs-panel .pgs-svg-fill { fill: currentColor; stroke: none; }
 #pgs-panel .pgs-answer code { font: 0.9em ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 5px; background: var(--pgs-soft); }
-#pgs-panel .pgs-ts { color: var(--pgs-accent); cursor: pointer; text-decoration: none; font-variant-numeric: tabular-nums; border-radius: 4px; padding: 0 2px; white-space: nowrap; }
-#pgs-panel .pgs-ts:hover { text-decoration: underline; background: color-mix(in srgb, var(--pgs-accent) 16%, transparent); }
-#pgs-panel .pgs-answer .pgs-h { font-weight: 650; margin-top: 4px; }
+#pgs-panel .pgs-ts {
+  color: color-mix(in srgb, var(--pgs-fg) 58%, transparent); cursor: pointer; text-decoration: none;
+  font-variant-numeric: tabular-nums; font-size: 0.85em; font-weight: 550; white-space: nowrap;
+  background: color-mix(in srgb, var(--pgs-fg) 8%, transparent); border-radius: 5px; padding: 1px 5px;
+  margin-inline-end: 3px; transition: color 0.12s ease, background 0.12s ease;
+}
+#pgs-panel .pgs-ts:hover { color: var(--pgs-fg); background: color-mix(in srgb, var(--pgs-fg) 16%, transparent); }
+#pgs-panel .pgs-answer .pgs-h { font-weight: 650; font-size: 0.95em; margin: 14px 0 6px; opacity: 0.92; }
+#pgs-panel .pgs-answer > .pgs-h:first-child { margin-top: 0; }
 
 /* the page card: attached in the composer stack until you send, then part of your message */
 #pgs-panel .pgs-card.pgs-attached {
@@ -817,7 +827,7 @@
         if (m.index > last) out.push(document.createTextNode(t.slice(last, m.index)));
         const secs = tsToSeconds(m[1]);
         out.push(h("a", {
-          className: "pgs-ts", textContent: m[0], href: "#", title: `Jump to ${m[1]}`,
+          className: "pgs-ts", textContent: m[1], href: "#", title: `Jump to ${m[1]}`,
           onclick: (e) => { e.preventDefault(); e.stopPropagation(); seek(secs); },
         }));
         last = m.index + m[0].length;
@@ -1494,5 +1504,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.15");
+  console.log("[page-summary] loaded v1.9.16");
 })();
