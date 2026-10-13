@@ -449,11 +449,23 @@
       const s = p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + (p[1] || 0);
       return s * 1000;
     };
+    let hostCount = 0;
     const readSegs = () => {
+      const hosts = doc.querySelectorAll("ytd-transcript-segment-renderer");
+      hostCount = hosts.length;
       const out = [];
-      for (const n of doc.querySelectorAll("ytd-transcript-segment-renderer")) {
-        const text = ((n.querySelector(".segment-text") || {}).textContent || "").replace(/\s+/g, " ").trim();
-        if (text) out.push([toMs((n.querySelector(".segment-timestamp") || {}).textContent), text]);
+      for (const n of hosts) {
+        let ts = ((n.querySelector(".segment-timestamp") || {}).textContent || "").trim();
+        let raw = ((n.querySelector(".segment-text") || {}).textContent || "").replace(/\s+/g, " ").trim();
+        if (!raw) {
+          // class names may have changed / moved into shadow DOM — fall back to the whole row
+          raw = (n.textContent || "").replace(/\s+/g, " ").trim();
+          if (!raw && n.openOrClosedShadowRoot) raw = (n.openOrClosedShadowRoot.textContent || "").replace(/\s+/g, " ").trim();
+          const m = raw.match(/^(\d{1,2}:\d{2}(?::\d{2})?)\s+([\s\S]+)$/);
+          if (m) { ts = ts || m[1]; raw = m[2]; }
+        }
+        raw = raw.trim();
+        if (raw) out.push([toMs(ts), raw]);
       }
       return out;
     };
@@ -503,6 +515,7 @@
             } catch (e) {}
           }
         }
+        info.hostCount = hostCount;
         info.segs = segs;
         if (!segs.length) info.noPanel = true;
         send(info);
@@ -521,7 +534,7 @@
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, foundButton: data?.foundButton, noPanel: data?.noPanel, error: data?.error });
+    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, noPanel: data?.noPanel, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
@@ -1441,5 +1454,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.10");
+  console.log("[page-summary] loaded v1.9.11");
 })();
