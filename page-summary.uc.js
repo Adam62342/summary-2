@@ -190,7 +190,7 @@
 #pgs-panel .pgs-foot[hidden] { display: none; }
 #pgs-panel .pgs-composer {
   display: flex; flex-direction: column; gap: 6px; padding: 12px 10px 10px 16px;
-  border: 1px solid var(--pgs-line); border-radius: 20px; background: var(--pgs-soft);
+  border: 1px solid var(--pgs-line); border-radius: 14px; background: var(--pgs-soft);
   transition: border-color 0.2s ease, box-shadow 0.25s ease;
 }
 #pgs-panel .pgs-composer:focus-within {
