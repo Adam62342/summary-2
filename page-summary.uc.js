@@ -565,13 +565,16 @@
       else cur.text += " " + text;
     }
     const lines = blocks.map((b) => (stamps ? `[${ytTime(b.t)}] ${b.text}` : b.text));
+    // the video's real length — used to tell the model its upper bound and to drop any
+    // timestamp it invents beyond the end of the video
+    const seconds = data.seconds || (blocks.length ? Math.round(blocks[blocks.length - 1].t / 1000) : 0);
     const head =
       `Video title: ${title}` +
       (data.author ? `\nChannel: ${data.author}` : "") +
-      (data.seconds ? `\nLength: ${ytTime(data.seconds * 1000)}` : "") +
+      (seconds ? `\nLength: ${ytTime(seconds * 1000)} (the video ends at ${ytTime(seconds * 1000)} — no timestamp can be later than this)` : "") +
       `\n\nThis is the spoken transcript of the video` +
-      (stamps ? " (each line is prefixed with its [mm:ss] timestamp)" : "") + ":\n";
-    return { title, url: pageUrl, text: head + lines.join("\n"), youtube: true };
+      (stamps ? " (each line is prefixed with its real [mm:ss] timestamp — only ever cite timestamps copied exactly from these lines)" : "") + ":\n";
+    return { title, url: pageUrl, text: head + lines.join("\n"), youtube: true, seconds };
   }
 
   async function getPageText(browser) {
@@ -860,6 +863,30 @@
         list = null;
       }
     }
+  }
+
+  // The local model likes to invent [mm:ss] stamps past the end of the video. Scrub the answer
+  // before it's shown: if the user wanted timestamps, drop any line that cites a time beyond the
+  // video length (hallucinated); if they didn't, strip stamps out of the prose entirely.
+  function scrubStamps(text, maxSeconds, wantTs) {
+    const TOK = /\[?\b(\d{1,2}:\d{2}(?::\d{2})?)\b\]?/g;
+    if (!wantTs) {
+      return text
+        .split("\n")
+        .map((ln) => ln.replace(TOK, "").replace(/\s{2,}/g, " ").replace(/\s+([.,;:])/g, "$1").trim())
+        .join("\n");
+    }
+    if (!maxSeconds) return text;
+    const limit = maxSeconds + 3; // small tolerance for rounding
+    return text
+      .split("\n")
+      .filter((ln) => {
+        TOK.lastIndex = 0;
+        let m;
+        while ((m = TOK.exec(ln))) if (tsToSeconds(m[1]) > limit) return false;
+        return true;
+      })
+      .join("\n");
   }
 
   // ---------- per-tab session ----------
@@ -1169,6 +1196,9 @@
       let acc = "";
       // on a YouTube video, make [mm:ss] stamps in the answer clickable (jump the player)
       const seek = ytId(srcUrl() || "") ? (s) => seekVideo(src.linkedBrowser, s) : null;
+      // did this request actually ask for timestamps? (mirrors the context stripping in requestFor)
+      const wantTs = /\btimestamp|\bmoment|\bchapter|time ?code|mm:ss|\bjump to\b/i.test(convo.at(-1)?.content || "");
+      const clean = (t) => (page?.youtube && seek ? scrubStamps(t, page.seconds, wantTs) : t);
       try {
         if (!llmReady()) {
           acc = extractive(page.text) || "Couldn't find enough text on this page to summarize.";
@@ -1181,6 +1211,8 @@
             renderMd(answerEl, acc, seek);
             if (stick) scrollDown(false);
           }
+          acc = clean(acc); // drop any timestamps the model invented past the end of the video
+          renderMd(answerEl, acc, seek);
         }
         if (acc) convo.push({ role: "assistant", content: acc });
       } catch (e) {
@@ -1515,5 +1547,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.17");
+  console.log("[page-summary] loaded v1.9.18");
 })();
