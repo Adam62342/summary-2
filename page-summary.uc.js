@@ -200,9 +200,9 @@
 #pgs-panel .pgs-dots i:nth-child(2) { animation-delay: 0.16s; }
 #pgs-panel .pgs-dots i:nth-child(3) { animation-delay: 0.32s; }
 @keyframes pgs-bounce { 0%, 75%, 100% { opacity: 0.3; transform: translateY(0); } 38% { opacity: 0.95; transform: translateY(-4px); } }
-/* each streamed chunk fades in instead of appearing letter-by-letter */
-#pgs-panel .pgs-chunk-in { animation: pgs-chunk 0.4s var(--pgs-ease) both; }
-@keyframes pgs-chunk { from { opacity: 0; filter: blur(1.5px); } to { opacity: 1; filter: blur(0); } }
+/* each freshly-streamed slice eases in (overlapping slices make a smooth wave, not a pop) */
+#pgs-panel .pgs-chunk-in { animation: pgs-chunk 0.55s var(--pgs-ease) both; }
+@keyframes pgs-chunk { from { opacity: 0; filter: blur(1px); } to { opacity: 1; filter: blur(0); } }
 #pgs-panel .pgs-mini {
   appearance: none; background: transparent; color: inherit; border: none; cursor: pointer;
   font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 7px; opacity: 0.5;
@@ -856,11 +856,21 @@
 
   function renderMd(el, text, seek, fadeStart = Infinity) {
     el.replaceChildren();
+    // render a line's content, wrapping only the characters newer than `fadeStart` in a fade
+    // span so each freshly-streamed slice eases in (settled text re-renders solid, no flicker)
+    const frag = (content, cStart) => {
+      const from = fadeStart === Infinity ? Infinity : Math.max(0, fadeStart - cStart);
+      if (from >= content.length) return inline(content, seek);
+      if (from <= 0) return [h("span", { className: "pgs-chunk-in" }, ...inline(content, seek))];
+      return [
+        ...inline(content.slice(0, from), seek),
+        h("span", { className: "pgs-chunk-in" }, ...inline(content.slice(from), seek)),
+      ];
+    };
     let list = null, kind = null, off = 0;
     for (const raw of text.split("\n")) {
       const start = off;
       off += raw.length + 1; // +1 for the "\n" we split on
-      const fresh = start >= fadeStart; // only animate lines that arrived this flush
       const line = raw.trim();
       const ul = line.match(/^[-*•]\s+(.*)/);
       const ol = line.match(/^\d+[.)]\s+(.*)/);
@@ -868,13 +878,14 @@
       if (ul || ol) {
         const tag = ul ? "ul" : "ol";
         if (!list || kind !== tag) { list = h(tag); kind = tag; el.append(list); }
-        list.append(h("li", fresh ? { className: "pgs-chunk-in" } : {}, ...inline((ul || ol)[1], seek)));
+        const content = (ul || ol)[1];
+        list.append(h("li", {}, ...frag(content, start + raw.indexOf(content))));
       } else if (hd) {
         list = null;
-        el.append(h("p", { className: "pgs-h" + (fresh ? " pgs-chunk-in" : "") }, ...inline(hd[1], seek)));
+        el.append(h("p", { className: "pgs-h" }, ...frag(hd[1], start + raw.indexOf(hd[1]))));
       } else if (line) {
         list = null;
-        el.append(h("p", fresh ? { className: "pgs-chunk-in" } : {}, ...inline(line, seek)));
+        el.append(h("p", {}, ...frag(line, start + raw.indexOf(line))));
       } else {
         list = null;
       }
@@ -1577,5 +1588,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.19");
+  console.log("[page-summary] loaded v1.9.20");
 })();
