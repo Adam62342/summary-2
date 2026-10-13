@@ -427,100 +427,67 @@
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s % 60).padStart(2, "0");
   };
 
-  // Runs INSIDE the YouTube tab: calls get_transcript exactly the way the page's own "Show
-  // transcript" button does — same origin, same session, same ytcfg context. Background chrome
-  // fetches get a 400 (no Origin) and the caption files are token-gated, so this is the only path
-  // YouTube still accepts. It posts back [startMs, text] segments for the chrome side to format.
+  // Runs INSIDE the YouTube tab. Caption files are now bot-gated (pot token) and the get_transcript
+  // API returns 400, but YouTube's own "Show transcript" panel still works because the page mints a
+  // valid token itself. So we open that panel and read the rendered segments straight from the DOM.
   function extractYouTubeTranscript() {
     const doc = content.document;
     const send = (d) => sendAsyncMessage("page-summary:text", d);
-
-    // minimal SHA-1 (hex) so we can sign the request the way the logged-in web client does
-    function sha1(str) {
-      const rotl = (n, s) => (n << s) | (n >>> (32 - s));
-      const bytes = unescape(encodeURIComponent(str));
-      const ml = bytes.length;
-      const nb = ((ml + 8) >> 6) + 1;
-      const w = new Array(nb * 16).fill(0);
-      for (let i = 0; i < ml; i++) w[i >> 2] |= bytes.charCodeAt(i) << (24 - (i % 4) * 8);
-      w[ml >> 2] |= 0x80 << (24 - (ml % 4) * 8);
-      w[nb * 16 - 1] = ml * 8;
-      let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
-      const a80 = new Array(80);
-      for (let i = 0; i < w.length; i += 16) {
-        for (let t = 0; t < 16; t++) a80[t] = w[i + t] | 0;
-        for (let t = 16; t < 80; t++) a80[t] = rotl(a80[t - 3] ^ a80[t - 8] ^ a80[t - 14] ^ a80[t - 16], 1);
-        let a = h0, b = h1, c = h2, d = h3, e = h4;
-        for (let t = 0; t < 80; t++) {
-          let f, k;
-          if (t < 20) { f = (b & c) | (~b & d); k = 0x5A827999; }
-          else if (t < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
-          else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
-          else { f = b ^ c ^ d; k = 0xCA62C1D6; }
-          const tmp = (rotl(a, 5) + f + e + k + a80[t]) | 0;
-          e = d; d = c; c = rotl(b, 30); b = a; a = tmp;
-        }
-        h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+    const sleep = (ms) => new Promise((r) => content.setTimeout(r, ms));
+    const toMs = (txt) => {
+      const p = (txt || "").trim().split(":").map(Number);
+      if (!p.length || p.some((n) => isNaN(n))) return 0;
+      const s = p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + (p[1] || 0);
+      return s * 1000;
+    };
+    const readSegs = () => {
+      const out = [];
+      for (const n of doc.querySelectorAll("ytd-transcript-segment-renderer")) {
+        const text = ((n.querySelector(".segment-text") || {}).textContent || "").replace(/\s+/g, " ").trim();
+        if (text) out.push([toMs((n.querySelector(".segment-timestamp") || {}).textContent), text]);
       }
-      return [h0, h1, h2, h3, h4].map((n) => (n >>> 0).toString(16).padStart(8, "0")).join("");
-    }
+      return out;
+    };
 
     (async () => {
       const info = { youtube: true, url: doc.location.href, title: doc.title.replace(/\s*[-–—]\s*YouTube\s*$/, "") };
       try {
-        const w = content.wrappedJSObject;
-        const cfg = w.ytcfg;
-        const g = (k) => { try { return cfg && cfg.get ? cfg.get(k) : (cfg && cfg.data_ ? cfg.data_[k] : null); } catch { return null; } };
-        const apiKey = g("INNERTUBE_API_KEY");
-        const ctxObj = g("INNERTUBE_CONTEXT");
         try {
-          const vd = (w.ytInitialPlayerResponse || {}).videoDetails || {};
+          const vd = (content.wrappedJSObject.ytInitialPlayerResponse || {}).videoDetails || {};
           if (vd.title) info.title = vd.title;
           info.author = vd.author || "";
           info.seconds = +vd.lengthSeconds || 0;
         } catch (e) {}
-        // params live in ytInitialData; stringify + match is reliable — walking the raw page
-        // object across the Xray boundary silently misses it
-        const dataStr = w.ytInitialData ? JSON.stringify(w.ytInitialData) : "";
-        const params = (dataStr.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
-        if (!apiKey || !ctxObj || !params) { info.noParams = !params; info.noCfg = !apiKey || !ctxObj; send(info); return; }
 
-        // sign the request like the signed-in web client (SAPISIDHASH) so get_transcript accepts it
-        const headers = { "content-type": "application/json" };
-        const ck = doc.cookie || "";
-        const sapisid = (ck.match(/(?:^|;\s*)SAPISID=([^;]+)/) || ck.match(/(?:^|;\s*)__Secure-3PAPISID=([^;]+)/) || [])[1];
-        if (sapisid) {
-          const ts = Math.floor(Date.now() / 1000);
-          const origin = doc.location.origin;
-          headers["authorization"] = "SAPISIDHASH " + ts + "_" + sha1(ts + " " + sapisid + " " + origin);
-          headers["x-origin"] = origin;
-          headers["x-goog-authuser"] = "0";
-        }
-        info.auth = !!sapisid;
-
-        const res = await content.fetch("/youtubei/v1/get_transcript?key=" + apiKey + "&prettyPrint=false", {
-          method: "POST", credentials: "include", headers,
-          body: JSON.stringify({ context: ctxObj, params }),
-        });
-        info.status = res.status;
-        const txt = await res.text();
-        if (res.status !== 200) { info.body = (txt || "").slice(0, 300); send(info); return; }
-        const segs = [];
-        try {
-          const j = JSON.parse(txt);
-          (function walk(o) {
-            if (!o || typeof o !== "object") return;
-            if (Array.isArray(o)) { for (const x of o) walk(x); return; }
-            const s = o.transcriptSegmentRenderer;
-            if (s) {
-              const t = ((s.snippet && s.snippet.runs) || []).map((r) => r.text || "").join("").replace(/\s+/g, " ").trim();
-              if (t) segs.push([+s.startMs || 0, t]);
-              return;
+        let segs = readSegs();
+        if (!segs.length) {
+          // the "Show transcript" button usually lives in the (collapsed) description
+          const expand = doc.querySelector("#description #expand, #description tp-yt-paper-button#expand, tp-yt-paper-button#expand");
+          if (expand) { try { expand.click(); } catch (e) {} await sleep(350); }
+          const findBtn = () => {
+            const direct = doc.querySelector('button[aria-label*="transcript" i], ytd-video-description-transcript-section-renderer button');
+            if (direct) return direct;
+            for (const b of doc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button")) {
+              const t = ((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")).toLowerCase();
+              if (t.includes("transcript")) return b;
             }
-            for (const k in o) walk(o[k]);
-          })(j);
-        } catch (e) { info.parseError = String((e && e.message) || e); }
+            return null;
+          };
+          const btn = findBtn();
+          info.foundButton = !!btn;
+          if (btn) {
+            try { btn.click(); } catch (e) {}
+            for (let i = 0; i < 48 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
+            // tidy up: close the panel we opened so the page looks untouched
+            try {
+              const panel = doc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
+              const close = panel && panel.querySelector('button[aria-label*="Close" i]');
+              if (close) close.click();
+            } catch (e) {}
+          }
+        }
         info.segs = segs;
+        if (!segs.length) info.noPanel = true;
         send(info);
       } catch (e) {
         info.error = String((e && e.message) || e);
@@ -532,19 +499,17 @@
   async function getYouTubeTranscript(browser, pageUrl) {
     const mm = browser.messageManager;
     const data = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 15000);
+      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 20000);
       const listener = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, listener); resolve(m.data); };
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { status: data?.status, segments: data?.segs?.length || 0, auth: data?.auth, noParams: data?.noParams, noCfg: data?.noCfg, body: data?.body, error: data?.error });
+    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, foundButton: data?.foundButton, noPanel: data?.noPanel, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
-      const e = new Error(data?.noParams
-        ? "this video has no transcript available"
-        : `YouTube didn't return the transcript (status ${data?.status ?? "?"})`);
-      if (data?.noParams) e.noCaptions = true;
+      const e = new Error("couldn't open a transcript for this video (it may not have captions)");
+      e.noCaptions = true;
       throw e;
     }
     const stamps = pref("yttimestamps", "true") !== "false";
@@ -1459,5 +1424,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.7");
+  console.log("[page-summary] loaded v1.9.8");
 })();
