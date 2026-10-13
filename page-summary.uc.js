@@ -488,36 +488,71 @@
     return null;
   }
 
+  // The caption URLs embedded in the watch page are often token-gated now and come back empty.
+  // The Android InnerTube client returns caption URLs that aren't, so we use it as a fallback.
+  async function innertubePlayer(id, signal) {
+    try {
+      const r = await fetch(
+        "https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w&prettyPrint=false",
+        {
+          method: "POST", signal, credentials: "omit",
+          headers: {
+            "content-type": "application/json",
+            "x-youtube-client-name": "3",
+            "x-youtube-client-version": "19.09.37",
+          },
+          body: JSON.stringify({
+            videoId: id,
+            context: { client: { clientName: "ANDROID", clientVersion: "19.09.37", androidSdkVersion: 30, hl: "en", gl: "US" } },
+          }),
+        }
+      );
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
+  }
+
   async function getYouTubeTranscript(id, pageUrl) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 15000);
     try {
+      let meta = { title: "YouTube video", author: "", seconds: 0 };
+      let caps = null, hadTracks = false;
+      const ordered = (tr) => [
+        ...tr.filter((t) => /^en/.test(t.languageCode || "") && t.kind !== "asr"),
+        ...tr.filter((t) => t.kind !== "asr"),
+        ...tr.filter((t) => /^en/.test(t.languageCode || "")),
+        ...tr,
+      ];
+      const trySource = async (pr) => {
+        if (!pr || caps) return;
+        const vd = pr.videoDetails;
+        if (vd) meta = { title: vd.title || meta.title, author: vd.author || meta.author, seconds: +vd.lengthSeconds || meta.seconds };
+        const tracks = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+        if (tracks.length) hadTracks = true;
+        const seen = new Set();
+        for (const t of ordered(tracks)) {
+          if (!t.baseUrl || seen.has(t.baseUrl)) continue;
+          seen.add(t.baseUrl);
+          const got = await fetchCaptions(t.baseUrl, ac.signal);
+          if (got && got.length) { caps = got; return; }
+        }
+      };
+
+      // 1) the watch page's own player response
       const html = await fetch(`https://www.youtube.com/watch?v=${id}&hl=en&bpctr=9999999999`, {
         signal: ac.signal, credentials: "include",
       }).then((r) => r.text());
-      const pr = ytJson(html, "ytInitialPlayerResponse");
-      if (!pr) throw new Error("couldn't read the video data");
-      const vd = pr.videoDetails || {};
-      const meta = { title: vd.title || "YouTube video", author: vd.author || "", seconds: +vd.lengthSeconds || 0 };
-      const tracks = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-      if (!tracks.length) { const e = new Error("no captions"); e.noCaptions = true; e.meta = meta; throw e; }
-      // try tracks in preference order (human English → any human → English auto → rest), and for
-      // each try every caption format, until one actually returns content
-      const ordered = [
-        ...tracks.filter((t) => /^en/.test(t.languageCode || "") && t.kind !== "asr"),
-        ...tracks.filter((t) => t.kind !== "asr"),
-        ...tracks.filter((t) => /^en/.test(t.languageCode || "")),
-        ...tracks,
-      ];
-      let caps = null;
-      const seen = new Set();
-      for (const t of ordered) {
-        if (!t.baseUrl || seen.has(t.baseUrl)) continue;
-        seen.add(t.baseUrl);
-        caps = await fetchCaptions(t.baseUrl, ac.signal);
-        if (caps && caps.length) break;
+      await trySource(ytJson(html, "ytInitialPlayerResponse"));
+
+      // 2) fall back to the Android client's token-free caption URLs
+      if (!caps) await trySource(await innertubePlayer(id, ac.signal));
+
+      if (!caps) {
+        const e = new Error(hadTracks ? "YouTube wouldn't return the caption text for this video" : "this video has no captions");
+        if (!hadTracks) e.noCaptions = true;
+        throw e;
       }
-      if (!caps || !caps.length) throw new Error("YouTube wouldn't return the captions for this video");
+
       const stamps = pref("yttimestamps", "true") !== "false";
       const lines = caps.map((c) => (stamps ? `[${ytTime(c.t)}] ${c.text}` : c.text));
       const head =
@@ -1432,5 +1467,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.1");
+  console.log("[page-summary] loaded v1.9.2");
 })();
