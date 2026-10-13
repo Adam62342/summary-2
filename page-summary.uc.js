@@ -434,6 +434,37 @@
   function extractYouTubeTranscript() {
     const doc = content.document;
     const send = (d) => sendAsyncMessage("page-summary:text", d);
+
+    // minimal SHA-1 (hex) so we can sign the request the way the logged-in web client does
+    function sha1(str) {
+      const rotl = (n, s) => (n << s) | (n >>> (32 - s));
+      const bytes = unescape(encodeURIComponent(str));
+      const ml = bytes.length;
+      const nb = ((ml + 8) >> 6) + 1;
+      const w = new Array(nb * 16).fill(0);
+      for (let i = 0; i < ml; i++) w[i >> 2] |= bytes.charCodeAt(i) << (24 - (i % 4) * 8);
+      w[ml >> 2] |= 0x80 << (24 - (ml % 4) * 8);
+      w[nb * 16 - 1] = ml * 8;
+      let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
+      const a80 = new Array(80);
+      for (let i = 0; i < w.length; i += 16) {
+        for (let t = 0; t < 16; t++) a80[t] = w[i + t] | 0;
+        for (let t = 16; t < 80; t++) a80[t] = rotl(a80[t - 3] ^ a80[t - 8] ^ a80[t - 14] ^ a80[t - 16], 1);
+        let a = h0, b = h1, c = h2, d = h3, e = h4;
+        for (let t = 0; t < 80; t++) {
+          let f, k;
+          if (t < 20) { f = (b & c) | (~b & d); k = 0x5A827999; }
+          else if (t < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
+          else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+          else { f = b ^ c ^ d; k = 0xCA62C1D6; }
+          const tmp = (rotl(a, 5) + f + e + k + a80[t]) | 0;
+          e = d; d = c; c = rotl(b, 30); b = a; a = tmp;
+        }
+        h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+      }
+      return [h0, h1, h2, h3, h4].map((n) => (n >>> 0).toString(16).padStart(8, "0")).join("");
+    }
+
     (async () => {
       const info = { youtube: true, url: doc.location.href, title: doc.title.replace(/\s*[-–—]\s*YouTube\s*$/, "") };
       try {
@@ -442,24 +473,45 @@
         const g = (k) => { try { return cfg && cfg.get ? cfg.get(k) : (cfg && cfg.data_ ? cfg.data_[k] : null); } catch { return null; } };
         const apiKey = g("INNERTUBE_API_KEY");
         const ctxObj = g("INNERTUBE_CONTEXT");
-        const ctxStr = ctxObj ? JSON.stringify(ctxObj) : null;
-        const dataStr = w.ytInitialData ? JSON.stringify(w.ytInitialData) : "";
         try {
           const vd = (w.ytInitialPlayerResponse || {}).videoDetails || {};
           if (vd.title) info.title = vd.title;
           info.author = vd.author || "";
           info.seconds = +vd.lengthSeconds || 0;
         } catch (e) {}
-        const params = (dataStr.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
-        if (!apiKey || !ctxStr || !params) { info.noParams = !params; send(info); return; }
+        // read the transcript params straight off the live object (no re-escaping round-trip)
+        let params = null;
+        (function walk(o) {
+          if (params || !o || typeof o !== "object") return;
+          const ep = o.getTranscriptEndpoint;
+          if (ep && ep.params) { params = ep.params; return; }
+          for (const k in o) { try { walk(o[k]); } catch (e) {} }
+        })(w.ytInitialData);
+        if (!apiKey || !ctxObj || !params) { info.noParams = !params; info.noCfg = !apiKey || !ctxObj; send(info); return; }
+
+        // sign the request like the signed-in web client (SAPISIDHASH) so get_transcript accepts it
+        const headers = { "content-type": "application/json" };
+        const ck = doc.cookie || "";
+        const sapisid = (ck.match(/(?:^|;\s*)SAPISID=([^;]+)/) || ck.match(/(?:^|;\s*)__Secure-3PAPISID=([^;]+)/) || [])[1];
+        if (sapisid) {
+          const ts = Math.floor(Date.now() / 1000);
+          const origin = doc.location.origin;
+          headers["authorization"] = "SAPISIDHASH " + ts + "_" + sha1(ts + " " + sapisid + " " + origin);
+          headers["x-origin"] = origin;
+          headers["x-goog-authuser"] = "0";
+        }
+        info.auth = !!sapisid;
+
         const res = await content.fetch("/youtubei/v1/get_transcript?key=" + apiKey + "&prettyPrint=false", {
-          method: "POST", credentials: "include", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ context: JSON.parse(ctxStr), params }),
+          method: "POST", credentials: "include", headers,
+          body: JSON.stringify({ context: ctxObj, params }),
         });
         info.status = res.status;
+        const txt = await res.text();
+        if (res.status !== 200) { info.body = (txt || "").slice(0, 300); send(info); return; }
         const segs = [];
         try {
-          const j = JSON.parse(await res.text());
+          const j = JSON.parse(txt);
           (function walk(o) {
             if (!o || typeof o !== "object") return;
             if (Array.isArray(o)) { for (const x of o) walk(x); return; }
@@ -471,7 +523,7 @@
             }
             for (const k in o) walk(o[k]);
           })(j);
-        } catch (e) {}
+        } catch (e) { info.parseError = String((e && e.message) || e); }
         info.segs = segs;
         send(info);
       } catch (e) {
@@ -489,7 +541,7 @@
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { status: data?.status, segments: data?.segs?.length || 0, noParams: data?.noParams, error: data?.error });
+    console.log("[page-summary] yt transcript:", { status: data?.status, segments: data?.segs?.length || 0, auth: data?.auth, noParams: data?.noParams, noCfg: data?.noCfg, body: data?.body, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
@@ -1411,5 +1463,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.5");
+  console.log("[page-summary] loaded v1.9.6");
 })();
