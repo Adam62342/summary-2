@@ -434,6 +434,15 @@
     const doc = content.document;
     const send = (d) => sendAsyncMessage("page-summary:text", d);
     const sleep = (ms) => new Promise((r) => content.setTimeout(r, ms));
+    // YouTube's buttons are Polymer; a bare .click() can miss its tap handler, so fire the full set
+    const fire = (el) => {
+      try { el.click(); } catch (e) {}
+      try {
+        for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+          el.dispatchEvent(new content.MouseEvent(type, { bubbles: true, cancelable: true, view: content }));
+        }
+      } catch (e) {}
+    };
     const toMs = (txt) => {
       const p = (txt || "").trim().split(":").map(Number);
       if (!p.length || p.some((n) => isNaN(n))) return 0;
@@ -448,6 +457,22 @@
       }
       return out;
     };
+    // find the "Show transcript" button WITHOUT relying on English text (the user's UI may be in
+    // any language) — prefer the structural location in the description's transcript section
+    const findBtn = () => {
+      const sect = doc.querySelector(
+        "ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer ytd-button-renderer"
+      );
+      if (sect) return sect;
+      const en = doc.querySelector('button[aria-label*="transcript" i]');
+      if (en) return en;
+      const words = ["transcript", "přepis", "文字起こし", "トランスクリプト", "transcripción", "transcription", "transkript", "stenogram", "字幕記録"];
+      for (const b of doc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button, a")) {
+        const t = ((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")).toLowerCase();
+        if (words.some((w) => t.includes(w))) return b;
+      }
+      return null;
+    };
 
     (async () => {
       const info = { youtube: true, url: doc.location.href, title: doc.title.replace(/\s*[-–—]\s*YouTube\s*$/, "") };
@@ -461,28 +486,20 @@
 
         let segs = readSegs();
         if (!segs.length) {
-          // the "Show transcript" button usually lives in the (collapsed) description
-          const expand = doc.querySelector("#description #expand, #description tp-yt-paper-button#expand, tp-yt-paper-button#expand");
-          if (expand) { try { expand.click(); } catch (e) {} await sleep(350); }
-          const findBtn = () => {
-            const direct = doc.querySelector('button[aria-label*="transcript" i], ytd-video-description-transcript-section-renderer button');
-            if (direct) return direct;
-            for (const b of doc.querySelectorAll("button, tp-yt-paper-button, yt-button-shape button")) {
-              const t = ((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")).toLowerCase();
-              if (t.includes("transcript")) return b;
-            }
-            return null;
-          };
-          const btn = findBtn();
+          // expand the description so its transcript section renders, then wait for the button
+          const expand = doc.querySelector("#description #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand");
+          if (expand) fire(expand);
+          let btn = null;
+          for (let i = 0; i < 20 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
           info.foundButton = !!btn;
           if (btn) {
-            try { btn.click(); } catch (e) {}
+            fire(btn);
             for (let i = 0; i < 48 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
-            // tidy up: close the panel we opened so the page looks untouched
+            // tidy up: close the panel we opened
             try {
               const panel = doc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
-              const close = panel && panel.querySelector('button[aria-label*="Close" i]');
-              if (close) close.click();
+              const close = panel && panel.querySelector('button[aria-label*="Close" i], button[aria-label*="Zavřít" i], button[aria-label*="閉じる"]');
+              if (close) fire(close);
             } catch (e) {}
           }
         }
@@ -499,7 +516,7 @@
   async function getYouTubeTranscript(browser, pageUrl) {
     const mm = browser.messageManager;
     const data = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 20000);
+      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 25000);
       const listener = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, listener); resolve(m.data); };
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
@@ -1424,5 +1441,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.8");
+  console.log("[page-summary] loaded v1.9.10");
 })();
