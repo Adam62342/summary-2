@@ -470,6 +470,7 @@
       return s * 1000;
     };
     let hostCount = 0;
+    let panelPeek = "";
     const readSegs = () => {
       let hosts = toArr(pdoc.querySelectorAll("ytd-transcript-segment-renderer, yt-transcript-segment-renderer"));
       if (!hosts.length) hosts = toArr(pdoc.querySelectorAll("[class*='transcript-segment-renderer'], [class*='transcript-segment']"));
@@ -490,6 +491,26 @@
         if (raw) out.push([toMs(ts), raw]);
       }
       return out;
+    };
+    // DOM-tag-agnostic fallback: read the opened transcript panel's text and parse every line that
+    // starts with an mm:ss timestamp. Survives YouTube renaming its segment elements.
+    const readFromPanel = () => {
+      const panels = toArr(pdoc.querySelectorAll(
+        'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"],' +
+        'ytd-engagement-panel-section-list-renderer,[class*="engagement-panel"],[class*="transcript"]'
+      ));
+      let best = [];
+      for (const p of panels) {
+        const txt = ((p.innerText || p.textContent) || "").trim();
+        if (!txt || !/\d{1,2}:\d{2}/.test(txt)) continue;
+        const rows = [];
+        for (const line of txt.split("\n")) {
+          const m = line.trim().match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(\S.*)$/);
+          if (m) rows.push([toMs(m[1]), m[2].replace(/\s+/g, " ").trim()]);
+        }
+        if (rows.length > best.length) { best = rows; if (!panelPeek) panelPeek = txt.slice(0, 300); }
+      }
+      return best.length >= 3 ? best : [];
     };
     // find the "Show transcript" button WITHOUT relying on English text — prefer the structural
     // location (description's transcript section), then fall back to a language-independent scan
@@ -540,6 +561,7 @@
         } catch (e) {}
 
         let segs = readSegs();
+        if (!segs.length) segs = readFromPanel();
         if (!segs.length) {
           // expand the description so its transcript section renders (scope to the description's own
           // "…more"/"…více" expander so we don't accidentally hit a comment's expander)
@@ -559,7 +581,12 @@
           if (btn) {
             const c = btn.tagName === "BUTTON" ? btn : (btn.querySelector && btn.querySelector("button")) || btn;
             try { c.click(); } catch (e) {}
-            for (let i = 0; i < 40 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
+            // read via the segment elements first, then fall back to parsing the panel's raw text
+            for (let i = 0; i < 40 && !segs.length; i++) {
+              await sleep(250);
+              segs = readSegs();
+              if (!segs.length) { segs = readFromPanel(); if (segs.length) info.viaPanel = true; }
+            }
             // tidy up: close the panel we opened
             try {
               const panel = pdoc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
@@ -569,6 +596,7 @@
           }
         }
         info.hostCount = hostCount;
+        info.panelPeek = panelPeek;
         info.segs = segs;
         if (!segs.length) info.noPanel = true;
         send(info);
@@ -587,7 +615,7 @@
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, expanded: data?.expanded, triedMenu: data?.triedMenu, noPanel: data?.noPanel, error: data?.error });
+    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, expanded: data?.expanded, triedMenu: data?.triedMenu, viaPanel: data?.viaPanel, noPanel: data?.noPanel, panelPeek: data?.panelPeek, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
@@ -1632,5 +1660,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.22");
+  console.log("[page-summary] loaded v1.9.23");
 })();
