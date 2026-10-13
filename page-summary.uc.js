@@ -421,204 +421,99 @@
     } catch { return null; }
   };
 
-  // pull the first balanced {...} object after a marker in the page HTML, then JSON.parse it
-  const ytJson = (html, marker) => {
-    const at = html.indexOf(marker);
-    if (at < 0) return null;
-    const start = html.indexOf("{", at);
-    if (start < 0) return null;
-    let depth = 0, inStr = false, esc = false;
-    for (let i = start; i < html.length; i++) {
-      const c = html[i];
-      if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; }
-      else if (c === '"') inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}" && --depth === 0) { try { return JSON.parse(html.slice(start, i + 1)); } catch { return null; } }
-    }
-    return null;
-  };
-
   const ytTime = (ms) => {
     const s = Math.max(0, Math.floor(ms / 1000));
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s % 60).padStart(2, "0");
   };
 
-  // Fetch a caption track as the signed-in browser would. YouTube often returns an empty body for
-  // one format/track but not another, so we try json3, then the XML formats, across the given URL.
-  // Returns [{ t(ms), text }] or null if everything came back empty.
-  async function fetchCaptions(baseUrl, signal) {
-    const clean = (baseUrl || "").replace(/\\u0026/g, "&").replace(/&fmt=[^&]*/g, "");
-    const add = (u, p) => u + (u.includes("?") ? "&" : "?") + p;
-    const get = async (u) => {
+  // Runs INSIDE the YouTube tab: calls get_transcript exactly the way the page's own "Show
+  // transcript" button does — same origin, same session, same ytcfg context. Background chrome
+  // fetches get a 400 (no Origin) and the caption files are token-gated, so this is the only path
+  // YouTube still accepts. It posts back [startMs, text] segments for the chrome side to format.
+  function extractYouTubeTranscript() {
+    const doc = content.document;
+    const send = (d) => sendAsyncMessage("page-summary:text", d);
+    (async () => {
+      const info = { youtube: true, url: doc.location.href, title: doc.title.replace(/\s*[-–—]\s*YouTube\s*$/, "") };
       try {
-        const r = await fetch(u, { signal, credentials: "include" });
-        if (!r.ok) return "";
-        return (await r.text()) || "";
-      } catch { return ""; }
-    };
-    // 1) json3
-    const j = await get(add(clean, "fmt=json3"));
-    if (j.trim()) {
-      try {
-        const out = [];
-        for (const ev of (JSON.parse(j).events || [])) {
-          if (!ev.segs) continue;
-          const t = ev.segs.map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim();
-          if (t) out.push({ t: ev.tStartMs || 0, text: t });
-        }
-        if (out.length) return out;
-      } catch {}
-    }
-    // 2) XML (default) and srv3 both yield <text start="..">…</text>
-    for (const suffix of ["", "fmt=srv3"]) {
-      const xml = await get(suffix ? add(clean, suffix) : clean);
-      if (xml.includes("<text")) {
+        const w = content.wrappedJSObject;
+        const cfg = w.ytcfg;
+        const g = (k) => { try { return cfg && cfg.get ? cfg.get(k) : (cfg && cfg.data_ ? cfg.data_[k] : null); } catch { return null; } };
+        const apiKey = g("INNERTUBE_API_KEY");
+        const ctxObj = g("INNERTUBE_CONTEXT");
+        const ctxStr = ctxObj ? JSON.stringify(ctxObj) : null;
+        const dataStr = w.ytInitialData ? JSON.stringify(w.ytInitialData) : "";
         try {
-          const doc = new DOMParser().parseFromString(xml, "text/xml");
-          const out = [];
-          for (const n of doc.querySelectorAll("text")) {
-            const t = (n.textContent || "").replace(/\s+/g, " ").trim();
-            if (t) out.push({ t: Math.round(parseFloat(n.getAttribute("start") || "0") * 1000), text: t });
-          }
-          if (out.length) return out;
-        } catch {}
+          const vd = (w.ytInitialPlayerResponse || {}).videoDetails || {};
+          if (vd.title) info.title = vd.title;
+          info.author = vd.author || "";
+          info.seconds = +vd.lengthSeconds || 0;
+        } catch (e) {}
+        const params = (dataStr.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
+        if (!apiKey || !ctxStr || !params) { info.noParams = !params; send(info); return; }
+        const res = await content.fetch("/youtubei/v1/get_transcript?key=" + apiKey + "&prettyPrint=false", {
+          method: "POST", credentials: "include", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ context: JSON.parse(ctxStr), params }),
+        });
+        info.status = res.status;
+        const segs = [];
+        try {
+          const j = JSON.parse(await res.text());
+          (function walk(o) {
+            if (!o || typeof o !== "object") return;
+            if (Array.isArray(o)) { for (const x of o) walk(x); return; }
+            const s = o.transcriptSegmentRenderer;
+            if (s) {
+              const t = ((s.snippet && s.snippet.runs) || []).map((r) => r.text || "").join("").replace(/\s+/g, " ").trim();
+              if (t) segs.push([+s.startMs || 0, t]);
+              return;
+            }
+            for (const k in o) walk(o[k]);
+          })(j);
+        } catch (e) {}
+        info.segs = segs;
+        send(info);
+      } catch (e) {
+        info.error = String((e && e.message) || e);
+        send(info);
       }
+    })();
+  }
+
+  async function getYouTubeTranscript(browser, pageUrl) {
+    const mm = browser.messageManager;
+    const data = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 15000);
+      const listener = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, listener); resolve(m.data); };
+      mm.addMessageListener(MSG, listener);
+      mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
+    });
+    console.log("[page-summary] yt transcript:", { status: data?.status, segments: data?.segs?.length || 0, noParams: data?.noParams, error: data?.error });
+    if (data?.error) throw new Error(data.error);
+    const segs = data?.segs || [];
+    if (!segs.length) {
+      const e = new Error(data?.noParams
+        ? "this video has no transcript available"
+        : `YouTube didn't return the transcript (status ${data?.status ?? "?"})`);
+      if (data?.noParams) e.noCaptions = true;
+      throw e;
     }
-    return null;
-  }
-
-  // The caption URLs embedded in the watch page are often token-gated now and come back empty.
-  // The Android InnerTube client returns caption URLs that aren't, so we use it as a fallback.
-  async function innertubePlayer(id, signal) {
-    try {
-      const r = await fetch(
-        "https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w&prettyPrint=false",
-        {
-          method: "POST", signal, credentials: "omit",
-          headers: {
-            "content-type": "application/json",
-            "x-youtube-client-name": "3",
-            "x-youtube-client-version": "19.09.37",
-          },
-          body: JSON.stringify({
-            videoId: id,
-            context: { client: { clientName: "ANDROID", clientVersion: "19.09.37", androidSdkVersion: 30, hl: "en", gl: "US" } },
-          }),
-        }
-      );
-      return r.ok ? await r.json() : null;
-    } catch { return null; }
-  }
-
-  // Primary path: the get_transcript InnerTube endpoint (what the "Show transcript" button uses).
-  // It returns the transcript as data, not a gated caption file, so it survives the token-gating.
-  async function getTranscriptPanel(id, html, signal) {
-    const key = (html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1] || "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w";
-    // use YouTube's own request context (client version, visitorData, …) verbatim — a 400 from
-    // get_transcript almost always means a hand-built context is missing one of these fields
-    const ctx = ytJson(html, '"INNERTUBE_CONTEXT":');
-    const cver = ctx?.client?.clientVersion || (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20240101.00.00";
-    const params = (html.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
-    console.log("[page-summary] yt get_transcript", { paramsFound: !!params, haveContext: !!ctx, clientVersion: cver });
-    if (!params || !ctx) return null;
-    let data;
-    try {
-      const r = await fetch(`https://www.youtube.com/youtubei/v1/get_transcript?key=${key}&prettyPrint=false`, {
-        method: "POST", signal, credentials: "include",
-        headers: {
-          "content-type": "application/json",
-          "x-youtube-client-name": "1",
-          "x-youtube-client-version": cver,
-          ...(ctx.client?.visitorData ? { "x-goog-visitor-id": ctx.client.visitorData } : {}),
-        },
-        body: JSON.stringify({ context: ctx, params }),
-      });
-      if (!r.ok) { console.warn("[page-summary] get_transcript HTTP", r.status); return null; }
-      data = JSON.parse(await r.text());
-    } catch (e) { console.warn("[page-summary] get_transcript error", e); return null; }
-    const out = [];
-    (function walk(o) {
-      if (!o || typeof o !== "object") return;
-      if (Array.isArray(o)) return void o.forEach(walk);
-      const seg = o.transcriptSegmentRenderer;
-      if (seg) {
-        const text = (seg.snippet?.runs || []).map((x) => x.text || "").join("").replace(/\s+/g, " ").trim();
-        if (text) out.push({ t: +seg.startMs || 0, text });
-        return;
-      }
-      for (const k in o) walk(o[k]);
-    })(data);
-    console.log("[page-summary] get_transcript segments:", out.length);
-    return out.length ? out : null;
-  }
-
-  async function getYouTubeTranscript(id, pageUrl) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 15000);
-    try {
-      let meta = { title: "YouTube video", author: "", seconds: 0 };
-      let caps = null, hadTracks = false;
-      const ordered = (tr) => [
-        ...tr.filter((t) => /^en/.test(t.languageCode || "") && t.kind !== "asr"),
-        ...tr.filter((t) => t.kind !== "asr"),
-        ...tr.filter((t) => /^en/.test(t.languageCode || "")),
-        ...tr,
-      ];
-      const trySource = async (pr, label) => {
-        if (!pr || caps) return;
-        const vd = pr.videoDetails;
-        if (vd) meta = { title: vd.title || meta.title, author: vd.author || meta.author, seconds: +vd.lengthSeconds || meta.seconds };
-        const tracks = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-        if (tracks.length) hadTracks = true;
-        console.log(`[page-summary] yt caption tracks (${label}):`, tracks.length);
-        const seen = new Set();
-        for (const t of ordered(tracks)) {
-          if (!t.baseUrl || seen.has(t.baseUrl)) continue;
-          seen.add(t.baseUrl);
-          const got = await fetchCaptions(t.baseUrl, ac.signal);
-          if (got && got.length) { caps = got; console.log(`[page-summary] got ${got.length} lines from caption file (${label})`); return; }
-        }
-      };
-
-      const html = await fetch(`https://www.youtube.com/watch?v=${id}&hl=en&bpctr=9999999999`, {
-        signal: ac.signal, credentials: "include",
-      }).then((r) => r.text());
-      console.log("[page-summary] yt watch html length:", html.length);
-      const prHtml = ytJson(html, "ytInitialPlayerResponse");
-      const vd = prHtml?.videoDetails;
-      if (vd) meta = { title: vd.title || meta.title, author: vd.author || meta.author, seconds: +vd.lengthSeconds || meta.seconds };
-
-      // 1) transcript panel endpoint (most reliable)
-      caps = await getTranscriptPanel(id, html, ac.signal);
-      // 2) caption tracks off the watch page
-      if (!caps) await trySource(prHtml, "watch");
-      // 3) caption tracks via the Android client (token-free URLs)
-      if (!caps) await trySource(await innertubePlayer(id, ac.signal), "android");
-
-      if (!caps) {
-        const e = new Error(hadTracks ? "YouTube returned caption tracks but no readable text (check the Browser Console for details)" : "this video has no captions");
-        if (!hadTracks) e.noCaptions = true;
-        throw e;
-      }
-
-      const stamps = pref("yttimestamps", "true") !== "false";
-      const lines = caps.map((c) => (stamps ? `[${ytTime(c.t)}] ${c.text}` : c.text));
-      const head =
-        `Video title: ${meta.title}` +
-        (meta.author ? `\nChannel: ${meta.author}` : "") +
-        (meta.seconds ? `\nLength: ${ytTime(meta.seconds * 1000)}` : "") +
-        `\n\nThis is the spoken transcript of the video` +
-        (stamps ? " (each line is prefixed with its [mm:ss] timestamp)" : "") + ":\n";
-      return { title: meta.title, url: pageUrl, text: head + lines.join("\n"), youtube: true };
-    } finally {
-      clearTimeout(timer);
-    }
+    const stamps = pref("yttimestamps", "true") !== "false";
+    const title = data.title || "YouTube video";
+    const lines = segs.map(([t, text]) => (stamps ? `[${ytTime(t)}] ${text}` : text));
+    const head =
+      `Video title: ${title}` +
+      (data.author ? `\nChannel: ${data.author}` : "") +
+      (data.seconds ? `\nLength: ${ytTime(data.seconds * 1000)}` : "") +
+      `\n\nThis is the spoken transcript of the video` +
+      (stamps ? " (each line is prefixed with its [mm:ss] timestamp)" : "") + ":\n";
+    return { title, url: pageUrl, text: head + lines.join("\n"), youtube: true };
   }
 
   async function getPageText(browser) {
     const vid = ytId(browser.currentURI.spec);
-    if (vid) return getYouTubeTranscript(vid, browser.currentURI.spec); // throws on no captions (handled by caller)
+    if (vid) return getYouTubeTranscript(browser, browser.currentURI.spec); // throws on no transcript (handled by caller)
     try {
       const mm = browser.messageManager;
       const data = await new Promise((resolve, reject) => {
@@ -1516,5 +1411,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.4");
+  console.log("[page-summary] loaded v1.9.5");
 })();
