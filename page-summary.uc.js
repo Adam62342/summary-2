@@ -349,7 +349,9 @@
       : provider() === "apple" || !!apiKey() || /localhost|127\.0\.0\.1/.test(baseUrl());
   // Apple's on-device model has a ~4k-token context, so long pages are read in chunks
   const isLocal = () => provider() === "apple" || /localhost|127\.0\.0\.1/.test(baseUrl());
-  const chunkSize = () => parseInt(pref("maxchars", ""), 10) || (isLocal() ? 6000 : MAX_CHARS);
+  // Apple's on-device model has a tiny context (chunk hard); other local models (Ollama/llama,
+  // etc.) handle far more, so give them a big window to avoid slow multi-part map-reduce.
+  const chunkSize = () => parseInt(pref("maxchars", ""), 10) || (provider() === "apple" ? 6000 : isLocal() ? 16000 : MAX_CHARS);
 
   // ---------- DOM helpers ----------
   const h = (tag, props = {}, ...kids) => {
@@ -490,14 +492,19 @@
 
         let segs = readSegs();
         if (!segs.length) {
-          // expand the description so its transcript section renders, then wait for the button
-          const expand = pdoc.querySelector("#description #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand");
-          if (expand) { try { expand.click(); } catch (e) {} }
+          // expand the description so its transcript section renders (scope to the description's own
+          // "…more"/"…více" expander so we don't accidentally hit a comment's expander)
+          for (const sel of ["ytd-watch-metadata #expand", "#description #expand", "#description-inline-expander #expand", "ytd-text-inline-expander #expand", "tp-yt-paper-button#expand"]) {
+            const ex = pdoc.querySelector(sel);
+            if (ex) { try { ex.click(); } catch (e) {} break; }
+          }
+          // wait for the transcript button to render, then click the actual <button> inside it
           let btn = null;
-          for (let i = 0; i < 20 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
+          for (let i = 0; i < 28 && !btn; i++) { btn = findBtn(); if (!btn) await sleep(250); }
           info.foundButton = !!btn;
           if (btn) {
-            try { btn.click(); } catch (e) {}
+            const c = btn.tagName === "BUTTON" ? btn : (btn.querySelector && btn.querySelector("button")) || btn;
+            try { c.click(); } catch (e) {}
             for (let i = 0; i < 48 && !segs.length; i++) { await sleep(250); segs = readSegs(); }
             // tidy up: close the panel we opened
             try {
@@ -536,7 +543,15 @@
     }
     const stamps = pref("yttimestamps", "true") !== "false";
     const title = data.title || "YouTube video";
-    const lines = segs.map(([t, text]) => (stamps ? `[${ytTime(t)}] ${text}` : text));
+    // merge the granular ~2s caption lines into larger blocks: far less text (faster for a local
+    // model) and far fewer timestamps, while still keeping a timestamp per block for "key moments"
+    const blocks = [];
+    let cur = null;
+    for (const [t, text] of segs) {
+      if (!cur || t - cur.t > 25000 || cur.text.length > 240) { cur = { t, text }; blocks.push(cur); }
+      else cur.text += " " + text;
+    }
+    const lines = blocks.map((b) => (stamps ? `[${ytTime(b.t)}] ${b.text}` : b.text));
     const head =
       `Video title: ${title}` +
       (data.author ? `\nChannel: ${data.author}` : "") +
@@ -1446,5 +1461,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.12");
+  console.log("[page-summary] loaded v1.9.13");
 })();
