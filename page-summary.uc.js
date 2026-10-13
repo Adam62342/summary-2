@@ -248,6 +248,8 @@
 /* stop button + inline bits */
 #pgs-panel .pgs-svg-fill { fill: currentColor; stroke: none; }
 #pgs-panel .pgs-answer code { font: 0.9em ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 5px; background: var(--pgs-soft); }
+#pgs-panel .pgs-ts { color: var(--pgs-accent); cursor: pointer; text-decoration: none; font-variant-numeric: tabular-nums; border-radius: 4px; padding: 0 2px; white-space: nowrap; }
+#pgs-panel .pgs-ts:hover { text-decoration: underline; background: color-mix(in srgb, var(--pgs-accent) 16%, transparent); }
 #pgs-panel .pgs-answer .pgs-h { font-weight: 650; margin-top: 4px; }
 
 /* the page card: attached in the composer stack until you send, then part of your message */
@@ -788,14 +790,44 @@
   }
 
   // ---------- minimal markdown -> DOM ----------
-  const inline = (s) =>
-    s.split(/(\*\*[^*]+\*\*|`[^`]+`)/).filter(Boolean).map((t) => {
-      if (t.startsWith("**") && t.endsWith("**") && t.length > 4) return h("strong", { textContent: t.slice(2, -2) });
-      if (t.startsWith("`") && t.endsWith("`") && t.length > 2) return h("code", { textContent: t.slice(1, -1) });
-      return document.createTextNode(t);
+  const tsToSeconds = (ts) => {
+    const p = ts.split(":").map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + (p[1] || 0);
+  };
+  const TS_RE = /\[?\b(\d{1,2}:\d{2}(?::\d{2})?)\b\]?/g;
+
+  // jump the video (in its tab) to a timestamp — no reload, just set the player's currentTime
+  function seekVideo(browser, seconds) {
+    if (!browser) return;
+    try { const tab = gBrowser.getTabForBrowser(browser); if (tab) gBrowser.selectedTab = tab; } catch (e) {}
+    const code = `(() => { try { const v = content.document.querySelector("video.html5-main-video, video"); if (v) { v.currentTime = ${Number(seconds) || 0}; if (v.paused) v.play(); } } catch (e) {} })()`;
+    try { browser.messageManager.loadFrameScript("data:application/javascript," + encodeURIComponent(code), false); } catch (e) {}
+  }
+
+  // seek is an optional (seconds) => void; when given, [mm:ss] / mm:ss become clickable jump links
+  const inline = (s, seek) =>
+    s.split(/(\*\*[^*]+\*\*|`[^`]+`)/).filter(Boolean).flatMap((t) => {
+      if (t.startsWith("**") && t.endsWith("**") && t.length > 4) return [h("strong", { textContent: t.slice(2, -2) })];
+      if (t.startsWith("`") && t.endsWith("`") && t.length > 2) return [h("code", { textContent: t.slice(1, -1) })];
+      if (!seek) return [document.createTextNode(t)];
+      const out = [];
+      let last = 0, m;
+      TS_RE.lastIndex = 0;
+      while ((m = TS_RE.exec(t))) {
+        if (m.index > last) out.push(document.createTextNode(t.slice(last, m.index)));
+        const secs = tsToSeconds(m[1]);
+        out.push(h("a", {
+          className: "pgs-ts", textContent: m[0], href: "#", title: `Jump to ${m[1]}`,
+          onclick: (e) => { e.preventDefault(); e.stopPropagation(); seek(secs); },
+        }));
+        last = m.index + m[0].length;
+      }
+      if (!out.length) return [document.createTextNode(t)];
+      if (last < t.length) out.push(document.createTextNode(t.slice(last)));
+      return out;
     });
 
-  function renderMd(el, text) {
+  function renderMd(el, text, seek) {
     el.replaceChildren();
     let list = null, kind = null;
     for (const raw of text.split("\n")) {
@@ -806,13 +838,13 @@
       if (ul || ol) {
         const tag = ul ? "ul" : "ol";
         if (!list || kind !== tag) { list = h(tag); kind = tag; el.append(list); }
-        list.append(h("li", {}, ...inline((ul || ol)[1])));
+        list.append(h("li", {}, ...inline((ul || ol)[1], seek)));
       } else if (hd) {
         list = null;
-        el.append(h("p", { className: "pgs-h" }, ...inline(hd[1])));
+        el.append(h("p", { className: "pgs-h" }, ...inline(hd[1], seek)));
       } else if (line) {
         list = null;
-        el.append(h("p", {}, ...inline(line)));
+        el.append(h("p", {}, ...inline(line, seek)));
       } else {
         list = null;
       }
@@ -1114,16 +1146,18 @@
       logEl.append(block);
       scrollDown(true);
       let acc = "";
+      // on a YouTube video, make [mm:ss] stamps in the answer clickable (jump the player)
+      const seek = ytId(srcUrl() || "") ? (s) => seekVideo(src.linkedBrowser, s) : null;
       try {
         if (!llmReady()) {
           acc = extractive(page.text) || "Couldn't find enough text on this page to summarize.";
-          renderMd(answerEl, acc);
+          renderMd(answerEl, acc, seek);
           answerEl.append(h("div", { className: "pgs-note", textContent: "Offline summary. Add an API key (or a local model) in the mod settings for AI answers." }));
         } else {
           for await (const d of streamLLM(requestFor(), signal)) {
             const stick = nearBottom();
             acc = acc.length > 20 && d.startsWith(acc) ? d : acc + d; // tolerate cumulative streams
-            renderMd(answerEl, acc);
+            renderMd(answerEl, acc, seek);
             if (stick) scrollDown(false);
           }
         }
@@ -1142,7 +1176,7 @@
           if (unreachable && !acc && convo.length === 1) {
             acc = extractive(page.text);
             const fb = h("div");
-            renderMd(fb, acc);
+            renderMd(fb, acc, seek);
             block.append(fb);
           }
         }
@@ -1460,5 +1494,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.14");
+  console.log("[page-summary] loaded v1.9.15");
 })();
