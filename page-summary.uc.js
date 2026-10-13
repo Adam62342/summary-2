@@ -748,44 +748,43 @@
     }
   }
 
-  async function complete(msgs, signal) {
-    const headers = { "content-type": "application/json", ...authHeaders() };
-    const body = JSON.stringify({
-      model: model(),
-      stream: false,
-      messages: [{ role: "system", content: "You extract key facts tersely." }, ...msgs],
-    });
-    let text = "";
-    for await (const c of chunks(baseUrl() + "/chat/completions", headers, body, signal)) text += c;
-    return JSON.parse(text).choices?.[0]?.message?.content || "";
-  }
-
-  // ---------- context building (chunked reading for small-context models) ----------
-  function chunkText(text, size) {
-    const out = [];
-    let cur = "";
-    for (const line of text.split("\n")) {
-      if (cur && cur.length + line.length > size) { out.push(cur); cur = ""; }
-      cur += (cur ? "\n" : "") + line.slice(0, size);
+  // ---------- context building ----------
+  // Reduce long text to its most informative lines/sentences with a cheap local TF ranking (no
+  // LLM), so a long video/page is summarized in ONE model pass instead of many slow map-reduce
+  // calls. Keeps original order (and any leading [mm:ss] timestamps) so "key moments" still work.
+  function condense(text, budget) {
+    if (text.length <= budget) return text;
+    let units = text.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (units.length < 6) units = (text.match(/[^.!?。！？]+[.!?。！？]+/g) || [text]).map((s) => s.trim()).filter(Boolean);
+    const stop = new Set(
+      "the and for with that this from which who his her their has have had not but also than then into over after before are was were been its they you your".split(" ")
+    );
+    const words = (s) => (s.toLowerCase().match(/[\p{L}']{3,}/gu) || []).filter((w) => !stop.has(w));
+    const freq = new Map();
+    for (const u of units) for (const w of words(u)) freq.set(w, (freq.get(w) || 0) + 1);
+    const scored = units
+      .map((u, i) => {
+        const ws = words(u);
+        return { u, i, score: ws.reduce((a, w) => a + (freq.get(w) || 0), 0) / Math.sqrt(ws.length || 1) };
+      })
+      .sort((a, b) => b.score - a.score);
+    const picked = [];
+    let used = 0;
+    for (const s of scored) {
+      if (used + s.u.length + 1 > budget) continue;
+      picked.push(s);
+      used += s.u.length + 1;
+      if (used >= budget * 0.98) break;
     }
-    if (cur) out.push(cur);
-    return out;
+    picked.sort((a, b) => a.i - b.i);
+    return picked.map((s) => s.u).join("\n");
   }
 
-  async function buildContext(page, signal, setStatus) {
+  function buildContext(page, signal, setStatus) {
     const size = chunkSize();
-    if (!isLocal() || page.text.length <= size) return page.text.slice(0, size);
-    let parts = chunkText(page.text, size);
-    if (parts.length > 8) parts = Array.from({ length: 8 }, (_, i) => parts[Math.floor((i * parts.length) / 8)]);
-    const instr = page.youtube
-      ? "List the key points in this video transcript excerpt as 4-6 terse bullets. Begin each bullet with its [mm:ss] timestamp:"
-      : "List the key facts in this excerpt as 4-6 terse bullet points:";
-    const notes = [];
-    for (let i = 0; i < parts.length; i++) {
-      setStatus(`Reading part ${i + 1} of ${parts.length}…`);
-      notes.push(await complete([{ role: "user", content: instr + "\n\n" + parts[i] }], signal));
-    }
-    return notes.join("\n").slice(0, size);
+    if (page.text.length <= size) return page.text;
+    setStatus("Condensing…");
+    return condense(page.text, size);
   }
 
   // ---------- minimal markdown -> DOM ----------
@@ -1461,5 +1460,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.13");
+  console.log("[page-summary] loaded v1.9.14");
 })();
