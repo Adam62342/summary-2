@@ -479,14 +479,10 @@
           info.author = vd.author || "";
           info.seconds = +vd.lengthSeconds || 0;
         } catch (e) {}
-        // read the transcript params straight off the live object (no re-escaping round-trip)
-        let params = null;
-        (function walk(o) {
-          if (params || !o || typeof o !== "object") return;
-          const ep = o.getTranscriptEndpoint;
-          if (ep && ep.params) { params = ep.params; return; }
-          for (const k in o) { try { walk(o[k]); } catch (e) {} }
-        })(w.ytInitialData);
+        // params live in ytInitialData; stringify + match is reliable — walking the raw page
+        // object across the Xray boundary silently misses it
+        const dataStr = w.ytInitialData ? JSON.stringify(w.ytInitialData) : "";
+        const params = (dataStr.match(/"getTranscriptEndpoint":\{"params":"([^"]+)"/) || [])[1];
         if (!apiKey || !ctxObj || !params) { info.noParams = !params; info.noCfg = !apiKey || !ctxObj; send(info); return; }
 
         // sign the request like the signed-in web client (SAPISIDHASH) so get_transcript accepts it
@@ -1463,5 +1459,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.6");
+  console.log("[page-summary] loaded v1.9.7");
 })();
