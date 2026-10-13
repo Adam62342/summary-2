@@ -1,7 +1,7 @@
 {
   "id": "page-summary",
   "name": "Page Summary",
-  "version": "1.9.17",
+  "version": "1.9.18",
   "description": "A native-looking, Dia-style summary & chat panel. Press ⌘E/Ctrl+E to open; the page attaches as a card and selected text stacks on top. On YouTube it reads the video's captions so you can summarize or ask about the video, with optional [mm:ss] key moments.",
   "author": "you",
   "homepage": "https://github.com/YOUR_USERNAME/page-summary",
