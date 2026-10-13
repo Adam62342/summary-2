@@ -26,10 +26,10 @@
   ];
   // shown instead of CHIPS when the panel is open on a YouTube video
   const YT_CHIPS = [
-    ["Summarize", "Summarize this video into concise bullet points."],
-    ["Key moments", "List the key moments as bullet points. Begin each bullet with its [mm:ss] timestamp, then a short, plain one-line description. Bold at most one key term per bullet."],
-    ["Takeaways", "What are the main takeaways from this video?"],
-    ["TL;DR", "Give a two-sentence TL;DR of this video."],
+    ["Summarize", "Summarize this video in 5-7 concise bullet points. Do not include any timestamps."],
+    ["Key moments", "Identify the most important moments across the ENTIRE video, from start to finish. Give 6-10 bullets total — never one per line, and do not stop partway through. Group related content into a single moment. Begin each bullet with that moment's [mm:ss] timestamp, then a short one-line description. Bold at most one key term per bullet."],
+    ["Takeaways", "What are the main takeaways from this video? Answer in a few concise bullet points with no timestamps."],
+    ["TL;DR", "Give a two-sentence TL;DR of this video. No timestamps."],
   ];
   const ICONS = {
     new: "M7 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V9M11.3 2.7l2 2L8 10l-2.7.7L6 8z",
@@ -556,11 +556,12 @@
     const stamps = pref("yttimestamps", "true") !== "false";
     const title = data.title || "YouTube video";
     // merge the granular ~2s caption lines into larger blocks: far less text (faster for a local
-    // model) and far fewer timestamps, while still keeping a timestamp per block for "key moments"
+    // model) and far fewer timestamps, so a plain summary stays clean and "key moments" groups
+    // naturally instead of firing a bullet every few seconds
     const blocks = [];
     let cur = null;
     for (const [t, text] of segs) {
-      if (!cur || t - cur.t > 25000 || cur.text.length > 240) { cur = { t, text }; blocks.push(cur); }
+      if (!cur || t - cur.t > 40000 || cur.text.length > 400) { cur = { t, text }; blocks.push(cur); }
       else cur.text += " " + text;
     }
     const lines = blocks.map((b) => (stamps ? `[${ytTime(b.t)}] ${b.text}` : b.text));
@@ -957,7 +958,17 @@
     // ----- request building: every request is self-contained (small local models ignore history) -----
     const requestFor = () => {
       const last = convo.at(-1);
-      const header = `Title: ${page.title}\nURL: ${page.url}\n\n${page.context ?? page.text.slice(0, chunkSize())}`;
+      const req = last?.content || pref("prompt", DEFAULT_PROMPT);
+      let ctx = page.context ?? page.text.slice(0, chunkSize());
+      // On YouTube every transcript line is prefixed with its [mm:ss] stamp (so "Key moments"
+      // can cite times). For anything that isn't explicitly about timing, strip those stamps so
+      // the model doesn't echo them into a plain summary.
+      if (page.youtube && !/\btimestamp|\bmoment|\bchapter|time ?code|mm:ss|\bjump to\b/i.test(req)) {
+        ctx = ctx
+          .replace(/^\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/gm, "")
+          .replace(/ \(each line is prefixed with its \[mm:ss\] timestamp\)/, "");
+      }
+      const header = `Title: ${page.title}\nURL: ${page.url}\n\n${ctx}`;
       const refText = (rs) => rs.map((r) => `"${r.text.slice(0, 1500)}"`).join("\n");
       const transcript = convo
         .slice(0, -1)
@@ -1504,5 +1515,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.16");
+  console.log("[page-summary] loaded v1.9.17");
 })();
