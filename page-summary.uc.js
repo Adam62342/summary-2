@@ -982,6 +982,7 @@
     const attMap = new Map(); // attachment key -> card element (the stack is updated incrementally)
     let page = null, convo = [], refs = [], ctrl = null;
     let busy = false, gen = 0, closed = false, userHidden = false;
+    let lastKey = ""; // page identity the chat currently reflects (to detect navigation to a new page/video)
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
     let self = null;
     const hideTitle = `Hide (Esc or ${SHORTCUT}) — your chat is kept for this tab`;
@@ -990,6 +991,9 @@
       const uri = src.linkedBrowser?.currentURI;
       return uri && /^https?$/.test(uri.scheme) ? uri.spec : null;
     };
+    // identity of the current page: the YouTube video id when on YouTube, else the URL minus its
+    // #hash. Changes only when you actually move to a different page/video (not on seeks or #jumps).
+    const srcKey = () => { const u = srcUrl(); return u ? (ytId(u) || u.split("#")[0]) : ""; };
     const setBusy = (b) => {
       busy = b;
       if (!sendBtn) return;
@@ -1320,6 +1324,20 @@
       if (url && url !== thumbFor) { clearTimeout(thumbTimer); thumbTimer = setTimeout(captureThumb, 1200); }
     }
 
+    // Called on any top-level navigation in the source tab (including YouTube's in-page video
+    // switches). If we actually moved to a different page/video, drop the cached page + chat so the
+    // next request reads the NEW page; otherwise just refresh the attachment card/thumbnail.
+    function onNav() {
+      if (closed) return;
+      const key = srcKey();
+      if (key === lastKey) { refreshAttach(); return; }
+      lastKey = key;
+      if (started || convo.length || page) newChat(); // was chatting about the previous page — start fresh
+      else refreshAttach(); // nothing sent yet; just reattach the new page
+      const url = srcUrl();
+      if (url) { clearTimeout(thumbTimer); thumbTimer = setTimeout(captureThumb, 1200); }
+    }
+
     // your message in the chat: its attachments (page card first) as tilted cards, then the bubble
     const userMsg = (label, rs, pageAtt) => {
       const cards = [];
@@ -1529,6 +1547,7 @@
     function open() {
       if (!panel) build();
       newChat();
+      lastKey = srcKey();
       input.focus();
       captureThumb();
     }
@@ -1618,7 +1637,7 @@
     }
 
     self = {
-      open, sync, dismiss, restore, position, close, pop, unpop, wipe, refreshAttach,
+      open, sync, dismiss, restore, position, close, pop, unpop, wipe, refreshAttach, onNav,
       get docked() { return host !== src; },
       get host() { return host; },
       get src() { return src; },
@@ -1687,7 +1706,7 @@
         const mine = [...sessions.values()].filter((x) => x.src === tab);
         if (!mine.length) return;
         if (flags & (WPL.LOCATION_CHANGE_RELOAD ?? 0x4)) mine.forEach((x) => x.wipe());
-        else if (!(flags & (WPL.LOCATION_CHANGE_SAME_DOCUMENT ?? 0x1))) mine.forEach((x) => x.refreshAttach());
+        else mine.forEach((x) => x.onNav()); // includes YouTube's in-page (same-document) video switches
       } catch (e) { console.warn("[page-summary] location listener", e); }
     },
     onStateChange(browser, webProgress, request, stateFlags) {
@@ -1733,5 +1752,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.25");
+  console.log("[page-summary] loaded v1.9.26");
 })();
