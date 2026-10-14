@@ -118,9 +118,6 @@
   display: flex; flex-direction: column; gap: 16px; padding: 14px 20px 10px;
 }
 #pgs-panel .pgs-msg { animation: pgs-msg 0.4s var(--pgs-ease) both; }
-#pgs-panel .pgs-card { animation-delay: 0.04s; }
-#pgs-panel .pgs-card + .pgs-ug { animation-delay: 0.14s; }
-#pgs-panel .pgs-card + .pgs-ug + * { animation-delay: 0.26s; }
 @keyframes pgs-msg {
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
   to   { opacity: 1; transform: none; }
@@ -142,41 +139,6 @@
   padding: 8px 16px; border-radius: 20px 20px 6px 20px; white-space: pre-wrap;
   background: color-mix(in srgb, var(--pgs-fg) 12%, transparent);
 }
-
-/* selected-text reference cards (composer stack + sent messages) */
-#pgs-panel .pgs-ref {
-  position: relative; flex: none; display: flex; align-items: center; gap: 10px; max-width: 220px;
-  padding: 6px 28px 6px 6px; border-radius: 14px; background: color-mix(in srgb, var(--pgs-fg) 9%, transparent);
-  animation: pgs-msg 0.35s var(--pgs-ease) both;
-}
-#pgs-panel .pgs-ug .pgs-ref { padding-right: 14px; max-width: 280px; }
-#pgs-panel .pgs-ref-ico {
-  flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
-  background: color-mix(in srgb, #000 35%, transparent); color: #fff; font: 700 22px/1 Georgia, serif; padding-top: 6px; box-sizing: border-box;
-}
-#pgs-panel .pgs-ref-meta { min-width: 0; }
-#pgs-panel .pgs-ref-kind { font-size: 11.5px; opacity: 0.5; line-height: 1.3; }
-#pgs-panel .pgs-ref-text { font-size: 12.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#pgs-panel .pgs-ref-x {
-  position: absolute; top: 5px; right: 5px; width: 18px; height: 18px; border-radius: 50%; border: none;
-  background: transparent; color: inherit; font-size: 9px; cursor: pointer; opacity: 0; transition: opacity 0.15s ease;
-}
-#pgs-panel .pgs-ref:hover .pgs-ref-x { opacity: 0.7; }
-#pgs-panel .pgs-ref-x:hover { opacity: 1; background: color-mix(in srgb, var(--pgs-fg) 14%, transparent); }
-
-/* Dia-style page card */
-#pgs-panel .pgs-card {
-  align-self: flex-end; display: flex; align-items: center; gap: 12px; max-width: 78%;
-  padding: 8px 18px 8px 8px; border-radius: 18px; background: var(--pgs-soft); transform-origin: bottom right;
-}
-#pgs-panel .pgs-card-ico {
-  flex: none; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
-  background: color-mix(in srgb, #000 38%, transparent); font-weight: 700; font-size: 16px; color: #fff;
-}
-#pgs-panel .pgs-card-fav { width: 24px; height: 24px; border-radius: 6px; }
-#pgs-panel .pgs-card-meta { min-width: 0; }
-#pgs-panel .pgs-card-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
-#pgs-panel .pgs-card-domain { font-size: 12.5px; opacity: 0.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 #pgs-panel .pgs-status { animation: pgs-msg 0.4s var(--pgs-ease) both, pgs-pulse 1.6s ease-in-out 0.5s infinite; }
 @keyframes pgs-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
@@ -275,63 +237,64 @@
 #pgs-panel .pgs-answer .pgs-h { font-weight: 650; font-size: 0.95em; margin: 14px 0 6px; opacity: 0.92; }
 #pgs-panel .pgs-answer > .pgs-h:first-child { margin-top: 0; }
 
-/* the page card: attached in the composer stack until you send, then part of your message */
-#pgs-panel .pgs-card.pgs-attached {
-  align-self: flex-start; max-width: 100%; padding: 6px 16px 6px 6px; border-radius: 14px;
-  background: color-mix(in srgb, var(--pgs-fg) 9%, transparent); animation: pgs-msg 0.35s var(--pgs-ease) both;
-}
-#pgs-panel .pgs-attached .pgs-card-ico { width: 38px; height: 38px; border-radius: 10px; font-size: 15px; }
-#pgs-panel .pgs-attached .pgs-card-fav { width: 20px; height: 20px; }
-#pgs-panel .pgs-attached .pgs-card-title { font-size: 13px; }
-#pgs-panel .pgs-attached .pgs-card-domain { font-size: 11.5px; }
-#pgs-panel .pgs-ug .pgs-card { max-width: 100%; }
-
-/* ----- whimsical attachment stack: page card + selected-text snippets ----- */
-/* A tidy pile of rotated cards that fans open into a straight, readable column on hover. */
+/* ----- attachment stack: page card (back) + selected text (on top); fans out on hover ----- */
+#pgs-panel { --cw: 62px; --ch: 80px; --pgs-spring: cubic-bezier(0.34, 1.5, 0.64, 1); }
+#pgs-panel .pgs-attach { display: block; }
+#pgs-panel .pgs-attach[hidden] { display: none; }
 #pgs-panel .pgs-stack {
-  display: flex; flex-direction: column; align-items: flex-start;
-  --pgs-h: 54px; --pgs-gap: 9px; --pgs-w: 210px;
-  width: 100%;
-  margin: 2px 0 6px;
+  position: relative; max-width: 100%; height: calc(var(--ch) + 26px);
+  width: calc(var(--cw) + (var(--n, 1) - 1) * 8px + 30px);
+  transition: width 0.5s var(--pgs-spring);
 }
-#pgs-panel .pgs-stack[hidden] { display: none; }
-/* Collapsed: cards are pulled onto one another (negative margins) into a fanned pile. The front
-   card (first in the DOM, newest context) sits flat and solid on top; each card behind pivots from
-   its bottom-left corner so its right side lifts up and peeks above the front card — a visible fan,
-   even without hovering. On hover the negative margins open to real gaps, sliding every card into
-   its own row (so the cards behind can never stay hidden). */
-#pgs-panel .pgs-stack-card {
-  box-sizing: border-box; height: var(--pgs-h);
-  margin-top: calc(-1 * var(--pgs-h));
-  z-index: calc(100 - var(--pgs-i, 0));
-  transform-origin: 0% 100%;
-  transform:
-    translateY(calc(var(--pgs-i, 0) * -4px))
-    rotate(var(--pgs-rot, 0deg))
-    scale(calc(1 - var(--pgs-i, 0) * 0.04));
-  opacity: calc(1 - var(--pgs-i, 0) * 0.12);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
-  transition: margin-top 0.42s var(--pgs-ease), transform 0.42s var(--pgs-ease),
-    opacity 0.38s ease, box-shadow 0.3s ease;
-  animation: pgs-msg 0.35s var(--pgs-ease) both;
+#pgs-panel .pgs-stack:hover { width: calc(var(--n, 1) * (var(--cw) + 10px) + 18px); }
+#pgs-panel .pgs-att { box-sizing: border-box; width: var(--cw); height: var(--ch); }
+#pgs-panel .pgs-stack .pgs-att {
+  position: absolute; z-index: calc(var(--i, 0) + 1);
+  left: calc(15px + var(--i, 0) * 8px); top: calc(13px + var(--dy, 0px));
+  transform: rotate(var(--rot, 0deg));
+  transition: left 0.5s var(--pgs-spring), transform 0.5s var(--pgs-spring);
 }
-#pgs-panel .pgs-stack-card:first-child { margin-top: 0; }
-/* a compact card hugging the left of the field (both card types) */
-#pgs-panel .pgs-stack .pgs-card.pgs-attached,
-#pgs-panel .pgs-stack .pgs-ref {
-  width: var(--pgs-w); max-width: calc(100% - 6px);
-  background: color-mix(in srgb, var(--pgs-bg) 90%, var(--pgs-fg));
-  border: 1px solid var(--pgs-line); border-radius: 14px;
+#pgs-panel .pgs-stack:hover .pgs-att {
+  left: calc(9px + var(--i, 0) * (var(--cw) + 10px));
+  transform: rotate(calc(var(--rot, 0deg) * 0.25));
 }
-#pgs-panel .pgs-stack .pgs-card.pgs-attached { padding: 7px 14px 7px 7px; }
-#pgs-panel .pgs-stack .pgs-ref { padding: 7px 30px 7px 7px; }
-/* hover the pile: open the gaps, straighten and solidify every card into its own row */
-#pgs-panel .pgs-stack:hover .pgs-stack-card {
-  margin-top: var(--pgs-gap);
-  transform: none; opacity: 1;
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
+#pgs-panel .pgs-att-in { animation: pgs-att-in 0.55s var(--pgs-spring) backwards; }
+@keyframes pgs-att-in { from { opacity: 0; transform: translateY(16px) scale(0.6) rotate(0deg); } }
+#pgs-panel .pgs-att-out { animation: pgs-att-out 0.22s ease forwards; pointer-events: none; }
+@keyframes pgs-att-out { to { opacity: 0; transform: translateY(-10px) scale(0.6) rotate(0deg); } }
+#pgs-panel .pgs-att-face {
+  position: absolute; inset: 0; overflow: hidden; border-radius: 14px;
+  background: color-mix(in srgb, var(--pgs-fg) 11%, var(--pgs-bg)); background-size: cover; background-position: center top;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pgs-fg) 18%, transparent), 0 8px 18px rgba(0, 0, 0, 0.28);
 }
-#pgs-panel .pgs-stack:hover .pgs-stack-card:first-child { margin-top: 0; }
+#pgs-panel .pgs-att-face > .pgs-att-badge {
+  position: absolute; left: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 6px; overflow: hidden;
+  display: grid; place-items: center; background: var(--pgs-bg); font-size: 11px; font-weight: 700;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+}
+#pgs-panel .pgs-att-fav { width: 14px; height: 14px; border-radius: 3px; }
+#pgs-panel .pgs-att-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 4px; }
+#pgs-panel .pgs-att-fallback .pgs-att-badge { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--pgs-bg); font-size: 15px; font-weight: 700; overflow: hidden; }
+#pgs-panel .pgs-att-fallback .pgs-att-fav { width: 20px; height: 20px; }
+#pgs-panel .pgs-att-host { font-size: 9px; opacity: 0.7; text-align: center; word-break: break-all; line-height: 1.2; }
+#pgs-panel .pgs-att-text .pgs-att-face { padding: 7px 7px 6px; background: color-mix(in srgb, var(--pgs-fg) 15%, var(--pgs-bg)); }
+#pgs-panel .pgs-att-q { font: 700 22px/0.8 Georgia, serif; opacity: 0.45; margin-bottom: 3px; }
+#pgs-panel .pgs-att-snip {
+  font-size: 8.5px; line-height: 1.32; opacity: 0.88; word-break: break-word; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
+}
+#pgs-panel .pgs-att-x {
+  position: absolute; top: -7px; right: -7px; z-index: 3; width: 20px; height: 20px; border-radius: 50%; border: 0; padding: 0;
+  background: var(--pgs-fg); color: var(--pgs-bg); font-size: 9px; line-height: 1; cursor: pointer;
+  opacity: 0; transform: scale(0.6); pointer-events: none; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: opacity 0.15s ease, transform 0.3s var(--pgs-spring);
+}
+#pgs-panel .pgs-stack:hover .pgs-att:hover .pgs-att-x { opacity: 1; transform: scale(1); pointer-events: auto; }
+
+/* the same cards inside a sent message */
+#pgs-panel .pgs-sent { display: flex; justify-content: flex-end; gap: 10px; padding: 8px 6px 4px; }
+#pgs-panel .pgs-sent .pgs-att { position: relative; flex: none; transform: rotate(var(--rot, 0deg)); }
+#pgs-panel .pgs-sent .pgs-att-x { display: none; }
 
 /* magnetic corner snap */
 #pgs-panel.pgs-snapping {
@@ -973,13 +936,50 @@
       .join("\n");
   }
 
+  // ---------- attachment cards (page thumbnail + selected text), stacked with different tilts ----------
+  const ATT_ROT = [-9, 8, -5, 11]; // resting tilt of each card in the stack, back to front
+  const ATT_DY = [0, 3, -2, 4];
+  const SENT_ROT = [-4, 3, -3, 4];
+
+  function attCard(kind, data, onRemove) {
+    const face = h("div", { className: "pgs-att-face" });
+    let tip;
+    if (kind === "page") {
+      let hostName = "";
+      try { hostName = new URL(data.url).hostname.replace(/^www\./, ""); } catch {}
+      tip = `${data.label || hostName} — ${hostName}`;
+      const badge = h("div", { className: "pgs-att-badge" });
+      if (data.image) badge.append(h("img", { className: "pgs-att-fav", src: data.image }));
+      else badge.textContent = (hostName[0] || "?").toUpperCase();
+      if (data.thumb) {
+        face.style.backgroundImage = `url("${data.thumb}")`;
+        face.append(badge);
+      } else {
+        face.append(h("div", { className: "pgs-att-fallback" }, badge, h("div", { className: "pgs-att-host", textContent: hostName })));
+      }
+    } else {
+      tip = data.text.slice(0, 400);
+      face.append(h("div", { className: "pgs-att-q", textContent: "“" }), h("div", { className: "pgs-att-snip", textContent: data.text.slice(0, 240) }));
+    }
+    const card = h("div", { className: `pgs-att pgs-att-${kind}`, title: tip }, face);
+    if (onRemove) {
+      card.append(h("button", {
+        className: "pgs-att-x", textContent: "✕", title: "Remove",
+        onclick: (e) => { e.stopPropagation(); onRemove(); },
+      }));
+    }
+    return card;
+  }
+
   // ---------- per-tab session ----------
   const sessions = new Map(); // host tab -> session
   const dock = { corner: "tr" }; // which corner of the page area the floating window is snapped to
 
   function makeSession(src) {
-    let panel, logEl, input, sendBtn, stackEl, closeBtn, splitBtn, winBtn, cardEl;
+    let panel, logEl, input, sendBtn, attachEl, stackEl, closeBtn, splitBtn, winBtn;
     let started = false, stopped = false, generating = false, dragPos = null;
+    let refSeq = 0, thumbUrl = "", thumbFor = "", thumbVer = 0, thumbBusy = false, thumbTimer = null;
+    const attMap = new Map(); // attachment key -> card element (the stack is updated incrementally)
     let page = null, convo = [], refs = [], ctrl = null;
     let busy = false, gen = 0, closed = false, userHidden = false;
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
@@ -1018,6 +1018,98 @@
       }
     }
 
+    const pageData = () => {
+      const url = srcUrl();
+      if (!url) return null;
+      let label = src.label || url;
+      try {
+        const hn = new URL(url).hostname.replace(/^www\./, "");
+        if (/youtube\.com$|youtu\.be$/.test(hn)) label = label.replace(/\s*[-–—]\s*YouTube\s*$/, "");
+      } catch {}
+      return { url, label, image: src.image, thumb: thumbFor === url ? thumbUrl : "" };
+    };
+
+    // a small portrait snapshot of the page, used as the card's picture
+    async function captureThumb() {
+      const url = srcUrl();
+      if (!url || thumbBusy || thumbFor === url || closed) return;
+      thumbBusy = true;
+      try {
+        const b = src.linkedBrowser;
+        const r = b.getBoundingClientRect();
+        if (r.width < 50 || r.height < 50) return;
+        const w = Math.min(r.width, r.height * 0.8);
+        const scale = Math.min(1, 180 / w);
+        const bmp = await b.drawSnapshot((r.width - w) / 2, 0, w, r.height, scale, "white");
+        const c = document.createElementNS(NS, "canvas");
+        c.width = bmp.width;
+        c.height = bmp.height;
+        c.getContext("2d").drawImage(bmp, 0, 0);
+        if (srcUrl() === url) {
+          thumbUrl = c.toDataURL("image/jpeg", 0.72);
+          thumbFor = url;
+          thumbVer++;
+          renderAttach();
+        }
+        bmp.close?.();
+      } catch (e) {
+        console.warn("[page-summary] page thumbnail unavailable", e);
+        thumbFor = url; // don't retry endlessly; the card falls back to the favicon design
+      } finally {
+        thumbBusy = false;
+      }
+    }
+
+    // The attachment stack above the field: the page card (back) + selected-text cards (on top).
+    // Cards are added/removed incrementally so only new cards animate; it fans out on hover.
+    function renderAttach() {
+      if (!stackEl) return;
+      const url = !started ? srcUrl() : null;
+      const items = [];
+      if (url) {
+        items.push({
+          key: "page",
+          sig: `${url}\n${src.label}\n${src.image}\n${thumbFor === url ? thumbVer : 0}`,
+          make: () => attCard("page", pageData()),
+        });
+      }
+      for (const r of refs) {
+        items.push({
+          key: r.id,
+          sig: r.text,
+          make: () => attCard("text", r, () => { refs = refs.filter((x) => x.id !== r.id); renderAttach(); }),
+        });
+      }
+      const keep = new Set(items.map((i) => i.key));
+      for (const [k, el] of attMap) {
+        if (keep.has(k)) continue;
+        attMap.delete(k);
+        el.classList.add("pgs-att-out");
+        setTimeout(() => el.remove(), 230);
+      }
+      items.forEach((it, idx) => {
+        let el = attMap.get(it.key);
+        if (!el) {
+          el = it.make();
+          el.classList.add("pgs-att-in");
+          attMap.set(it.key, el);
+          if (it.key === "page") stackEl.prepend(el); else stackEl.append(el);
+        } else if (el._sig !== it.sig) {
+          const nel = it.make();
+          el.replaceWith(nel);
+          attMap.set(it.key, nel);
+          el = nel;
+        }
+        el._sig = it.sig;
+        el.style.setProperty("--i", String(idx));
+        el.style.setProperty("--rot", `${ATT_ROT[idx % ATT_ROT.length]}deg`);
+        el.style.setProperty("--dy", `${ATT_DY[idx % ATT_DY.length]}px`);
+      });
+      stackEl.style.setProperty("--n", String(Math.max(1, items.length)));
+      attachEl.hidden = !items.length;
+      if (input) input.placeholder = ytId(srcUrl() || "") ? "Ask about this video…" : "Ask a question about this page…";
+    }
+
     function refCard(ref, removable) {
       const card = h("div", { className: "pgs-ref", title: ref.text.slice(0, 400) },
         h("div", { className: "pgs-ref-ico", textContent: "\u201C" }),
@@ -1027,43 +1119,19 @@
       if (removable) {
         card.append(h("button", {
           className: "pgs-ref-x", textContent: "✕", title: "Remove",
-          onclick: () => { refs = refs.filter((r) => r !== ref); renderStack(); },
+          onclick: () => { refs = refs.filter((r) => r !== ref); renderAttach(); },
         }));
       }
       return card;
-    }
-    // Each context is a card: the page, plus any selected-text snippets. The newest context sits
-    // on top (fully visible); the rest tuck behind it with a tilt for depth (see IMG_0034).
-    // Order, front -> back: newest snippet, ... oldest snippet, page card.
-    function renderStack() {
-      if (!stackEl) return;
-      const cards = [];
-      for (let k = refs.length - 1; k >= 0; k--) {
-        const rc = refCard(refs[k], true);
-        rc.classList.add("pgs-stack-card");
-        cards.push(rc);
-      }
-      const url = started ? null : srcUrl();
-      if (url) {
-        const pc = pageCard(url, true);
-        pc.classList.add("pgs-stack-card");
-        cards.push(pc);
-      }
-      // front card sits flat; each card further back leans a touch more to the left (fanned deck)
-      cards.forEach((card, i) => {
-        card.style.setProperty("--pgs-i", String(i));
-        card.style.setProperty("--pgs-rot", (i === 0 ? 0 : -(4 + i * 2)).toFixed(2) + "deg");
-      });
-      stackEl.replaceChildren(...cards);
-      stackEl.hidden = !cards.length;
     }
     function addRef(text) {
       if (!text || text.length < 2) return;
       // growing/shrinking the same selection replaces its card instead of stacking
       const i = refs.findIndex((r) => r.text.includes(text) || text.includes(r.text));
-      if (i >= 0) refs[i] = { text }; else refs.push({ text });
+      if (i >= 0) refs[i] = { id: refs[i].id, text };
+      else refs.push({ id: ++refSeq, text });
       if (refs.length > 3) refs.shift();
-      renderStack();
+      renderAttach();
     }
 
     // ----- request building: every request is self-contained (small local models ignore history) -----
@@ -1208,7 +1276,8 @@
       enableDrag(head);
 
       logEl = h("div", { className: "pgs-log" });
-      stackEl = h("div", { className: "pgs-stack", hidden: true });
+      stackEl = h("div", { className: "pgs-stack" });
+      attachEl = h("div", { className: "pgs-attach", hidden: true }, stackEl);
       const isVid = !!ytId(srcUrl() || "");
       input = h("textarea", { className: "pgs-input", rows: 1, placeholder: isVid ? "Ask about this video…" : "Ask a question about this page…" });
       input.addEventListener("input", autosize);
@@ -1220,7 +1289,7 @@
         h("button", { className: "pgs-chip", textContent: label, onclick: () => submit(q || pref("prompt", DEFAULT_PROMPT), { label }) })
       ));
       const foot = h("div", { className: "pgs-foot" },
-        h("div", { className: "pgs-composer" }, stackEl, input, h("div", { className: "pgs-row" }, chips, sendBtn)));
+        h("div", { className: "pgs-composer" }, attachEl, input, h("div", { className: "pgs-row" }, chips, sendBtn)));
 
       panel = h("div", { id: "pgs-panel" }, head, logEl, foot);
       document.documentElement.append(panel);
@@ -1245,12 +1314,23 @@
 
     // The page being chatted about sits in the composer as a card (with selected-text snippets
     // stacked on top of it) until you send. Re-render that pile when the tab/page changes.
-    const refreshAttach = () => { if (!closed) renderStack(); };
+    function refreshAttach() {
+      if (started || closed) return;
+      renderAttach();
+      const url = srcUrl();
+      if (url && url !== thumbFor) { clearTimeout(thumbTimer); thumbTimer = setTimeout(captureThumb, 1200); }
+    }
 
-    // your message in the chat: page card (first message only) + selected-text cards + the bubble
-    const userMsg = (label, rs, card) =>
-      h("div", { className: "pgs-msg pgs-ug" }, ...(card ? [card] : []), ...rs.map((r) => refCard(r, false)),
+    // your message in the chat: its attachments (page card first) as tilted cards, then the bubble
+    const userMsg = (label, rs, pageAtt) => {
+      const cards = [];
+      if (pageAtt) cards.push(attCard("page", pageAtt));
+      for (const r of rs) cards.push(attCard("text", r));
+      cards.forEach((c, i) => c.style.setProperty("--rot", `${SENT_ROT[i % SENT_ROT.length]}deg`));
+      return h("div", { className: "pgs-msg pgs-ug" },
+        ...(cards.length ? [h("div", { className: "pgs-sent" }, ...cards)] : []),
         h("div", { className: "pgs-ubub", textContent: label }));
+    };
 
     function actionsRow(getText) {
       const mini = (label, fn) => h("button", { className: "pgs-mini", textContent: label, onclick: fn });
@@ -1400,7 +1480,6 @@
         return;
       }
       if (closed || my !== gen) { if (!closed) page = null; return; }
-      if (page.title && cardEl) cardEl._title.textContent = page.title;
       page.text = page.text.slice(0, MAX_CHARS * 2);
       ctrl = new AbortController();
       try {
@@ -1423,15 +1502,10 @@
       if (text === undefined) { input.value = ""; autosize(); }
       const mine = refs;
       refs = [];
-      renderStack();
-      let card = null;
-      if (!started) { // the attached page card moves from the text field into the chat, together with your message
-        started = true;
-        const url = srcUrl();
-        if (url) { card = pageCard(url, false); cardEl = card; }
-        renderStack();
-      }
-      logEl.append(userMsg(opts.label || q, mine, card));
+      const pageAtt = !started ? pageData() : null; // the page card travels with the first message
+      started = true;
+      renderAttach(); // the cards leave the text field...
+      logEl.append(userMsg(opts.label || q, mine, pageAtt)); // ...and land in the chat with your request
       scrollDown(true);
       const entry = { role: "user", content: q, refs: mine };
       if (!page) { startFirst(entry); return; }
@@ -1446,11 +1520,10 @@
       convo = [];
       refs = [];
       started = false;
-      cardEl = null;
-      renderStack();
       setBusy(false);
       if (input) { input.value = ""; autosize(); }
       logEl.replaceChildren();
+      renderAttach();
     }
 
     // open an empty chat; the page is attached to the text field, nothing is read or sent until you ask
@@ -1458,6 +1531,7 @@
       if (!panel) build();
       newChat();
       input.focus();
+      captureThumb();
     }
 
     // the page was reloaded: the chat is deleted (in split-view mode its tab goes away too)
@@ -1660,5 +1734,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.23");
+  console.log("[page-summary] loaded v1.9.24");
 })();
