@@ -35,7 +35,6 @@
     new: "M7 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V9M11.3 2.7l2 2L8 10l-2.7.7L6 8z",
     close: "M4 4l8 8M12 4l-8 8",
     send: "M8 13V3M3.5 7.5L8 3l4.5 4.5",
-    split: "M2.5 3.5h11v9h-11zM8 3.5v9",
     win: "M5.5 2.5h8v8M2.5 5.5h8v8h-8z",
     stop: "M5 3.5h6A1.5 1.5 0 0 1 12.5 5v6a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 11V5A1.5 1.5 0 0 1 5 3.5z",
   };
@@ -220,7 +219,6 @@
   background: var(--pgs-bg); backdrop-filter: none;
 }
 #pgs-panel.pgs-docked .pgs-head { cursor: default; }
-#pgs-panel.pgs-docked .pgs-split-btn { display: none; }
 #pgs-panel .pgs-win-btn { display: none; }
 #pgs-panel.pgs-docked .pgs-win-btn { display: grid; }
 
@@ -1143,20 +1141,6 @@
       if (input) input.placeholder = ytId(srcUrl() || "") ? "Ask about this video…" : "Ask a question about this page…";
     }
 
-    function refCard(ref, removable) {
-      const card = h("div", { className: "pgs-ref", title: ref.text.slice(0, 400) },
-        h("div", { className: "pgs-ref-ico", textContent: "\u201C" }),
-        h("div", { className: "pgs-ref-meta" },
-          h("div", { className: "pgs-ref-kind", textContent: "Selected text" }),
-          h("div", { className: "pgs-ref-text", textContent: ref.text })));
-      if (removable) {
-        card.append(h("button", {
-          className: "pgs-ref-x", textContent: "✕", title: "Remove",
-          onclick: () => { refs = refs.filter((r) => r !== ref); renderAttach(); },
-        }));
-      }
-      return card;
-    }
     function addRef(text) {
       if (!text || text.length < 2) return;
       // growing/shrinking the same selection replaces its card instead of stacking
@@ -1330,20 +1314,6 @@
     }
 
     // ----- conversation -----
-    function pageCard(url, attached) {
-      const hostName = new URL(url).hostname.replace(/^www\./, "");
-      const ico = h("div", { className: "pgs-card-ico" });
-      if (src.image) ico.append(h("img", { className: "pgs-card-fav", src: src.image }));
-      else ico.textContent = (hostName[0] || "?").toUpperCase();
-      let label = src.label || url;
-      if (/youtube\.com$|youtu\.be$/.test(hostName)) label = label.replace(/\s*[-–—]\s*YouTube\s*$/, "");
-      const title = h("div", { className: "pgs-card-title", textContent: label });
-      const card = h("div", { className: attached ? "pgs-card pgs-attached" : "pgs-card" }, ico,
-        h("div", { className: "pgs-card-meta" }, title, h("div", { className: "pgs-card-domain", textContent: hostName })));
-      card._title = title;
-      return card;
-    }
-
     // The page being chatted about sits in the composer as a card (with selected-text snippets
     // stacked on top of it) until you send. Re-render that pile when the tab/page changes.
     function refreshAttach() {
@@ -1781,5 +1751,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.27");
+  console.log("[page-summary] loaded v1.9.28");
 })();
