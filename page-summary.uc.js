@@ -199,13 +199,37 @@
   scrollbar-width: none;
 }
 #pgs-panel .pgs-input::placeholder { color: inherit; opacity: 0.45; }
-#pgs-panel .pgs-row { display: flex; align-items: center; gap: 8px; }
+#pgs-panel .pgs-row { position: relative; display: flex; align-items: center; gap: 8px; }
 #pgs-panel .pgs-chips { flex: 1; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 #pgs-panel .pgs-chip {
   appearance: none; background: transparent; color: inherit; cursor: pointer; white-space: nowrap;
   border: 1px solid var(--pgs-line); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 12px; opacity: 0.7;
 }
 #pgs-panel .pgs-chip:hover { opacity: 1; background: var(--pgs-soft); }
+/* "+" add-context button + its popover menu */
+#pgs-panel .pgs-add {
+  appearance: none; flex: none; cursor: pointer; width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--pgs-line); background: transparent; color: inherit; opacity: 0.7;
+  font: 400 18px/1 system-ui, sans-serif; display: grid; place-items: center; padding: 0 0 2px;
+  transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.15s var(--pgs-ease);
+}
+#pgs-panel .pgs-add:hover { opacity: 1; background: var(--pgs-soft); }
+#pgs-panel .pgs-add:active { transform: scale(0.9); }
+#pgs-panel .pgs-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 10; min-width: 220px; max-width: 300px;
+  max-height: 320px; overflow-y: auto; scrollbar-width: thin; padding: 6px;
+  background: color-mix(in srgb, var(--pgs-bg) 96%, transparent); backdrop-filter: blur(30px) saturate(1.5);
+  border: 1px solid var(--pgs-line); border-radius: 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  animation: pgs-msg 0.22s var(--pgs-ease) both;
+}
+#pgs-panel .pgs-menu-item {
+  display: block; width: 100%; text-align: left; appearance: none; border: none; cursor: pointer;
+  background: transparent; color: inherit; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 9px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#pgs-panel .pgs-menu-item:hover { background: var(--pgs-soft); }
+#pgs-panel .pgs-menu-sep { font-size: 11px; opacity: 0.5; padding: 8px 10px 3px; }
+#pgs-panel .pgs-addnote { font-size: 12px; opacity: 0.6; padding: 4px 2px 0; animation: pgs-fade 0.3s ease both; }
 #pgs-panel .pgs-send {
   appearance: none; border: none; cursor: pointer; flex: none; width: 30px; height: 30px; border-radius: 50%;
   display: grid; place-items: center; background: color-mix(in srgb, var(--pgs-fg) 88%, transparent); color: var(--pgs-bg);
@@ -275,7 +299,13 @@
 #pgs-panel .pgs-att-fallback .pgs-att-badge { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--pgs-bg); font-size: 15px; font-weight: 700; overflow: hidden; }
 #pgs-panel .pgs-att-fallback .pgs-att-fav { width: 20px; height: 20px; }
 #pgs-panel .pgs-att-host { font-size: 9px; opacity: 0.7; text-align: center; word-break: break-all; line-height: 1.2; }
-#pgs-panel .pgs-att-text .pgs-att-face { padding: 7px 7px 6px; background: color-mix(in srgb, var(--pgs-fg) 15%, var(--pgs-bg)); }
+#pgs-panel .pgs-att-text .pgs-att-face,
+#pgs-panel .pgs-att-clip .pgs-att-face,
+#pgs-panel .pgs-att-moment .pgs-att-face { padding: 7px 7px 6px; background: color-mix(in srgb, var(--pgs-fg) 15%, var(--pgs-bg)); }
+#pgs-panel .pgs-att-tag {
+  font-size: 7.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+  opacity: 0.6; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 #pgs-panel .pgs-att-q { font: 700 22px/0.8 Georgia, serif; opacity: 0.45; margin-bottom: 3px; }
 #pgs-panel .pgs-att-snip {
   font-size: 8.5px; line-height: 1.32; opacity: 0.88; word-break: break-word; overflow: hidden;
@@ -597,7 +627,7 @@
     })();
   }
 
-  async function getYouTubeTranscript(browser, pageUrl) {
+  async function getYouTubeTranscript(browser, pageUrl, forceStamps) {
     const mm = browser.messageManager;
     const data = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 30000);
@@ -613,7 +643,7 @@
       e.noCaptions = true;
       throw e;
     }
-    const stamps = pref("yttimestamps", "true") !== "false";
+    const stamps = forceStamps || pref("yttimestamps", "true") !== "false";
     const title = data.title || "YouTube video";
     // merge the granular ~2s caption lines into larger blocks: far less text (faster for a local
     // model) and far fewer timestamps, so a plain summary stays clean and "key moments" groups
@@ -878,6 +908,19 @@
     try { browser.messageManager.loadFrameScript("data:application/javascript," + encodeURIComponent(code), false); } catch (e) {}
   }
 
+  // read the current playback position (seconds) of the tab's <video>, for the "this moment" card
+  function getVideoTime(browser) {
+    return new Promise((resolve) => {
+      const mm = browser?.messageManager;
+      if (!mm) { resolve(0); return; }
+      const timer = setTimeout(() => { try { mm.removeMessageListener(MSG, l); } catch (e) {} resolve(0); }, 2500);
+      const l = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, l); resolve(Number(m.data?.t) || 0); };
+      mm.addMessageListener(MSG, l);
+      const code = `(() => { try { const v = content.document.querySelector("video.html5-main-video, video"); sendAsyncMessage(${JSON.stringify(MSG)}, { t: v ? v.currentTime : 0 }); } catch (e) { sendAsyncMessage(${JSON.stringify(MSG)}, { t: 0 }); } })()`;
+      try { mm.loadFrameScript("data:application/javascript," + encodeURIComponent(code), false); } catch (e) { clearTimeout(timer); resolve(0); }
+    });
+  }
+
   // seek is an optional (seconds) => void; when given, [mm:ss] / mm:ss become clickable jump links
   const inline = (s, seek) =>
     s.split(/(\*\*[^*]+\*\*|`[^`]+`)/).filter(Boolean).flatMap((t) => {
@@ -971,7 +1014,7 @@
   function attCard(kind, data, onRemove) {
     const face = h("div", { className: "pgs-att-face" });
     let tip;
-    if (kind === "page") {
+    if (kind === "page" || kind === "tab") {
       let hostName = "";
       try { hostName = new URL(data.url).hostname.replace(/^www\./, ""); } catch {}
       tip = `${data.label || hostName} — ${hostName}`;
@@ -985,7 +1028,8 @@
         face.append(h("div", { className: "pgs-att-fallback" }, badge, h("div", { className: "pgs-att-host", textContent: hostName })));
       }
     } else {
-      tip = data.text.slice(0, 400);
+      tip = (data.label ? data.label + " — " : "") + data.text.slice(0, 400);
+      if (data.label) face.append(h("div", { className: "pgs-att-tag", textContent: data.label }));
       face.append(h("div", { className: "pgs-att-q", textContent: "“" }), h("div", { className: "pgs-att-snip", textContent: data.text.slice(0, 240) }));
     }
     const card = h("div", { className: `pgs-att pgs-att-${kind}`, title: tip }, face);
@@ -1010,6 +1054,7 @@
     let page = null, convo = [], refs = [], ctrl = null;
     let busy = false, gen = 0, closed = false, userHidden = false;
     let lastKey = ""; // page identity the chat currently reflects (to detect navigation to a new page/video)
+    let ytRows = null; // cached [sec, text] transcript rows for the current video (for "this moment")
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
     let self = null;
     const hideTitle = `Hide (Esc or ${SHORTCUT}) — your chat is kept for this tab`;
@@ -1107,8 +1152,8 @@
       for (const r of refs) {
         items.push({
           key: r.id,
-          sig: r.text,
-          make: () => attCard("text", r, () => { refs = refs.filter((x) => x.id !== r.id); renderAttach(); }),
+          sig: `${r.kind || "text"}\n${r.label || ""}\n${r.image || ""}\n${r.text}`,
+          make: () => attCard(r.kind || "text", r, () => { refs = refs.filter((x) => x.id !== r.id); renderAttach(); }),
         });
       }
       const keep = new Set(items.map((i) => i.key));
@@ -1144,11 +1189,125 @@
     function addRef(text) {
       if (!text || text.length < 2) return;
       // growing/shrinking the same selection replaces its card instead of stacking
-      const i = refs.findIndex((r) => r.text.includes(text) || text.includes(r.text));
-      if (i >= 0) refs[i] = { id: refs[i].id, text };
-      else refs.push({ id: ++refSeq, text });
-      if (refs.length > 3) refs.shift();
+      const i = refs.findIndex((r) => (r.kind || "text") === "text" && (r.text.includes(text) || text.includes(r.text)));
+      if (i >= 0) refs[i] = { id: refs[i].id, kind: "text", text };
+      else refs.push({ id: ++refSeq, kind: "text", text });
+      if (refs.length > 5) refs.shift();
       renderAttach();
+    }
+
+    // add a non-selection context card (another tab, pasted text, a video moment, …)
+    function addContext(item) {
+      if (!item || !item.text || !item.text.trim()) return;
+      refs.push({ id: ++refSeq, ...item });
+      if (refs.length > 5) refs.shift();
+      renderAttach();
+    }
+
+    // ----- extra context sources (paste / another tab / a video moment) -----
+    function readClipboard() {
+      try {
+        const xfer = Cc["@mozilla.org/widget/transferable;1"].createInstance(Ci.nsITransferable);
+        xfer.init(null);
+        for (const flavor of ["text/plain", "text/unicode"]) {
+          try {
+            xfer.addDataFlavor(flavor);
+            Services.clipboard.getData(xfer, Services.clipboard.kGlobalClipboard);
+            const o = {};
+            xfer.getTransferData(flavor, o);
+            const s = o.value?.QueryInterface?.(Ci.nsISupportsString)?.data;
+            if (s) return s;
+          } catch (e) {}
+        }
+      } catch (e) {}
+      return "";
+    }
+    function pasteCard() {
+      const t = readClipboard().replace(/\s+/g, " ").trim();
+      if (!t) { flashNote("Clipboard is empty (or not text)."); return; }
+      addContext({ kind: "clip", label: "Pasted", text: t.slice(0, 4000) });
+    }
+
+    async function addTab(tab) {
+      if (!tab || tab === host) return;
+      flashNote("Reading tab…", true);
+      try {
+        const data = await getPageText(tab.linkedBrowser);
+        const text = (data?.text || "").replace(/\s+/g, " ").trim().slice(0, 6000);
+        if (!text) { flashNote("Couldn't read that tab."); return; }
+        clearNote();
+        addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text });
+      } catch (e) {
+        flashNote("Couldn't read that tab.");
+      }
+    }
+
+    // fetch + cache the current video's timestamped transcript rows (first use pays the cost)
+    async function ensureYtRows() {
+      if (ytRows) return ytRows;
+      const data = await getYouTubeTranscript(src.linkedBrowser, srcUrl(), true);
+      const rows = [];
+      for (const ln of (data?.text || "").split("\n")) {
+        const m = ln.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*(.*)$/);
+        if (m && m[2]) rows.push([tsToSeconds(m[1]), m[2]]);
+      }
+      ytRows = rows;
+      return rows;
+    }
+    async function addMoment() {
+      const url = srcUrl();
+      if (!url || !ytId(url)) return;
+      flashNote("Grabbing this moment…", true);
+      let t = 0, rows = [];
+      try {
+        [t, rows] = await Promise.all([getVideoTime(src.linkedBrowser), ensureYtRows()]);
+      } catch (e) { flashNote("Couldn't read the transcript for this video."); return; }
+      if (!rows.length) { flashNote("No transcript available for this video."); return; }
+      const W = 30; // seconds of context on each side of the playhead
+      let near = rows.filter((r) => r[0] >= t - W && r[0] <= t + W);
+      if (!near.length) { // fall back to the few rows closest to the playhead
+        near = rows.slice().sort((a, b) => Math.abs(a[0] - t) - Math.abs(b[0] - t)).slice(0, 6).sort((a, b) => a[0] - b[0]);
+      }
+      const text = near.map((r) => r[1]).join(" ").replace(/\s+/g, " ").trim().slice(0, 2000);
+      if (!text) { flashNote("Couldn't find transcript near this point."); return; }
+      const label = `${ytTime(near[0][0] * 1000)}–${ytTime(near[near.length - 1][0] * 1000)}`;
+      clearNote();
+      addContext({ kind: "moment", label, text });
+    }
+
+    // small transient line under the composer for add-context status
+    let noteEl = null, noteTimer = null;
+    function clearNote() { clearTimeout(noteTimer); if (noteEl) { noteEl.remove(); noteEl = null; } }
+    function flashNote(msg, sticky) {
+      clearNote();
+      if (!stackEl) return;
+      noteEl = h("div", { className: "pgs-addnote", textContent: msg });
+      attachEl?.parentNode?.insertBefore(noteEl, attachEl.nextSibling);
+      if (!sticky) noteTimer = setTimeout(clearNote, 2600);
+    }
+
+    // "+" popover: paste text, add another open tab, or (on YouTube) grab the current moment
+    let addMenuEl = null;
+    const onDocDown = (e) => { if (addMenuEl && !addMenuEl.contains(e.target) && !e.target.closest(".pgs-add")) closeAddMenu(); };
+    function closeAddMenu() {
+      if (!addMenuEl) return;
+      addMenuEl.remove(); addMenuEl = null;
+      document.removeEventListener("pointerdown", onDocDown, true);
+    }
+    function openAddMenu(anchor) {
+      if (addMenuEl) { closeAddMenu(); return; }
+      const items = [];
+      const mi = (label, fn) => h("button", { className: "pgs-menu-item", textContent: label, onclick: () => { closeAddMenu(); fn(); } });
+      if (ytId(srcUrl() || "")) items.push(mi("◉   This moment", addMoment));
+      items.push(mi("⎘   Paste text", pasteCard));
+      const tabs = gBrowser.tabs.filter((t) => t !== host && t.linkedBrowser && /^https?$/.test(t.linkedBrowser.currentURI?.scheme || ""));
+      if (tabs.length) {
+        items.push(h("div", { className: "pgs-menu-sep", textContent: "Add another tab" }));
+        for (const t of tabs.slice(0, 12)) items.push(mi("▸   " + (t.label || "Tab").slice(0, 44), () => addTab(t)));
+      }
+      addMenuEl = h("div", { className: "pgs-menu" }, ...items);
+      anchor.parentNode.appendChild(addMenuEl);
+      setTimeout(() => document.addEventListener("pointerdown", onDocDown, true), 0);
     }
 
     // ----- request building: every request is self-contained (small local models ignore history) -----
@@ -1166,6 +1325,12 @@
       }
       const header = `Title: ${page.title}\nURL: ${page.url}\n\n${ctx}`;
       const refText = (rs) => rs.map((r) => `"${r.text.slice(0, 1500)}"`).join("\n");
+      // label each attached card so the model can tell a tab from a selection from a video excerpt
+      const refHead = (r) =>
+        r.kind === "tab" ? `ANOTHER TAB THE USER ATTACHED (${r.label || "tab"})`
+        : r.kind === "clip" ? "TEXT THE USER PASTED IN"
+        : r.kind === "moment" ? `EXCERPT FROM THIS VIDEO (${r.label || "moment"})`
+        : "TEXT THE USER SELECTED ON THE PAGE";
       const transcript = convo
         .slice(0, -1)
         .slice(-4)
@@ -1175,7 +1340,7 @@
         )
         .join("\n");
       const refsBlock = last?.refs?.length
-        ? `\n\n=== TEXT THE USER SELECTED ON THE PAGE (their request is about this) ===\n${refText(last.refs)}`
+        ? "\n\n" + last.refs.map((r) => `=== ${refHead(r)} ===\n${r.text.slice(0, 2000)}`).join("\n\n")
         : "";
       return [{
         role: "user",
@@ -1301,11 +1466,12 @@
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); submit(); }
       });
       sendBtn = h("button", { className: "pgs-send", onclick: () => (busy ? stop() : submit()) });
+      const addBtn = h("button", { className: "pgs-add", title: "Add context (tab, pasted text, video moment)", onclick: (e) => { e.stopPropagation(); openAddMenu(addBtn); } }, "+");
       const chips = h("div", { className: "pgs-chips" }, ...(isVid ? YT_CHIPS : CHIPS).map(([label, q]) =>
         h("button", { className: "pgs-chip", textContent: label, onclick: () => submit(q || pref("prompt", DEFAULT_PROMPT), { label }) })
       ));
       const foot = h("div", { className: "pgs-foot" },
-        h("div", { className: "pgs-composer" }, attachEl, input, h("div", { className: "pgs-row" }, chips, sendBtn)));
+        h("div", { className: "pgs-composer" }, attachEl, input, h("div", { className: "pgs-row" }, addBtn, chips, sendBtn)));
 
       panel = h("div", { id: "pgs-panel" }, head, logEl, foot);
       document.documentElement.append(panel);
@@ -1341,7 +1507,7 @@
     const userMsg = (label, rs, pageAtt) => {
       const cards = [];
       if (pageAtt) cards.push(attCard("page", pageAtt));
-      for (const r of rs) cards.push(attCard("text", r));
+      for (const r of rs) cards.push(attCard(r.kind || "text", r));
       cards.forEach((c, i) => c.style.setProperty("--rot", `${SENT_ROT[i % SENT_ROT.length]}deg`));
       return h("div", { className: "pgs-msg pgs-ug" },
         ...(cards.length ? [h("div", { className: "pgs-sent" }, ...cards)] : []),
@@ -1536,6 +1702,9 @@
       convo = [];
       refs = [];
       started = false;
+      ytRows = null;
+      closeAddMenu();
+      clearNote();
       setBusy(false);
       if (input) { input.value = ""; autosize(); }
       logEl.replaceChildren();
@@ -1627,6 +1796,7 @@
       closed = true;
       gen++;
       ctrl?.abort();
+      closeAddMenu();
       try { mm?.removeMessageListener(SEL_MSG, onSelection); } catch {}
       sessions.delete(host);
       if (!panel) return;
@@ -1751,5 +1921,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.28");
+  console.log("[page-summary] loaded v1.9.29");
 })();
