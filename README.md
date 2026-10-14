@@ -1,18 +1,48 @@
 # Page Summary (Sine mod)
 
-Dia-style summary panel for Zen / Firefox. Click the toolbar button or press Alt+Shift+P.
+A Dia-style AI summary & chat panel for Zen / Firefox, loaded as a userChrome.js mod via Sine.
+Press **⌘E** (macOS) / **Ctrl+E** (Windows/Linux), or click the toolbar button, to toggle it on
+the current tab.
 
-- Reads the page text directly and streams a bullet summary into a native-looking panel.
-- On YouTube, reads the video's captions instead of the page, so you can summarize or ask about
-  the video. Works on watch pages, Shorts, and youtu.be links; prefers a human English caption
-  track, falls back to auto-captions, and says so when a video has no captions at all. Keeps
-  [mm:ss] timestamps so the "Key moments" chip can point you at the right spot (toggle in settings).
-- Follow-up questions, Copy, Regenerate.
-- No API key: falls back to an offline extractive summarizer (instant, no network).
-- Apple Intelligence (default): runs on-device through afm-server (http://127.0.0.1:11435/v1, model apple.local).
-  Long pages are read in chunks to fit the small on-device context window.
-- With a key (Anthropic, or any OpenAI-compatible endpoint such as OpenAI, Gemini, Groq, Ollama):
-  full AI summaries + follow-ups. Set it in the mod's settings.
+## What it does
 
-Disable the old "Perplexity Summarize" mod first (same Alt+Shift+P shortcut).
-The API key is stored as a plain-text pref in your profile, not in this repo.
+- **Summarize & chat any page.** Reads the page's main text and streams a tight bullet summary into
+  a native-looking side panel. Ask follow-up questions; Copy or Regenerate any answer.
+- **Context cards.** The current page attaches to the composer as a small thumbnail card. Select
+  text on the page and it stacks on top as a quote-snippet card — the pile fans out on hover, and
+  each card has a ✕ to remove it. Whatever's attached when you send travels into your message.
+- **YouTube video summaries.** On a video, it reads the video's own transcript instead of the page
+  chrome. It opens YouTube's "Show transcript" panel and scrapes it directly, so it works regardless
+  of interface language and without caption APIs. Works on watch pages, Shorts, and youtu.be links.
+  - Chips: **Summarize**, **Key moments**, **Takeaways**, **TL;DR**.
+  - **Key moments** are grouped across the whole video and prefixed with clickable **[mm:ss]**
+    timestamps that seek the player. Invented/out-of-range timestamps are filtered out.
+  - Plain summaries stay timestamp-free; timestamps only show when you ask for moments.
+  - Switch to a different video in the same tab and it re-reads the new one automatically.
+  - Toggle whether the transcript keeps timestamps in the mod's settings.
+- **Smooth streaming.** Animated "thinking" dots appear before the first token, then the answer
+  eases in a few lines at a time rather than character-by-character.
+- **Movable window.** Drag the header to move it; it snaps to the nearest corner. Double-click the
+  header to reset to the top-right.
+
+## AI backends
+
+Set these in the mod's settings (Sine → this mod → preferences):
+
+- **Apple Intelligence (default).** Runs on-device via afm-server (`http://127.0.0.1:11435/v1`,
+  model `apple.local`). No API key. Long pages are condensed to fit the small on-device context.
+- **Anthropic (Claude).** Needs an API key.
+- **Any OpenAI-compatible endpoint** — OpenAI, Gemini, Groq, Ollama, etc. Point the base URL at your
+  server (e.g. a local Ollama running Llama 3.2 3B) and set a key if it needs one.
+- **No key / server unreachable.** Falls back to an instant offline extractive summarizer (no
+  network).
+
+## Settings
+
+Provider · API key · model · OpenAI-compatible base URL · afm-server URL · panel width/height ·
+summary instruction · max characters sent to the model · keep YouTube [mm:ss] timestamps.
+
+## Notes
+
+- The API key is stored as a plain-text preference in your Firefox profile, not in this repo.
+- Files: `page-summary.uc.js` (all logic + styles), `theme.json`, `preferences.json`, `chrome.css`.
