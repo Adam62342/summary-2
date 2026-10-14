@@ -457,21 +457,36 @@
     };
     // DOM-tag-agnostic fallback: read the opened transcript panel's text and parse every line that
     // starts with an mm:ss timestamp. Survives YouTube renaming its segment elements.
+    // Parse a transcript panel's visible text into [ms, text] rows. Handles both layouts: timestamp
+    // and text on one line ("0:04 hello"), AND timestamp on its own line with the text following it
+    // (YouTube commonly renders it that way) — otherwise we'd read zero rows and report "no captions".
+    const parsePanelText = (txt) => {
+      const rows = [];
+      let cur = null;
+      for (const raw of txt.split("\n")) {
+        const line = raw.trim();
+        if (!line) continue;
+        const m = line.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*(.*)$/);
+        if (m) { if (cur) rows.push(cur); cur = [toMs(m[1]), m[2].trim()]; }
+        else if (cur) cur[1] = (cur[1] + " " + line).replace(/\s+/g, " ").trim();
+      }
+      if (cur) rows.push(cur);
+      return rows.filter((r) => r[1]); // drop stray timestamps that never got any text
+    };
     const readFromPanel = () => {
-      const panels = toArr(pdoc.querySelectorAll(
-        'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"],' +
-        'ytd-engagement-panel-section-list-renderer,[class*="engagement-panel"],[class*="transcript"]'
-      ));
+      const specific = pdoc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
+      const list = specific ? [specific] : [];
+      for (const el of toArr(pdoc.querySelectorAll('ytd-engagement-panel-section-list-renderer,[class*="engagement-panel"],[class*="transcript"]'))) {
+        if (el !== specific) list.push(el);
+      }
       let best = [];
-      for (const p of panels) {
+      for (const p of list) {
         const txt = ((p.innerText || p.textContent) || "").trim();
         if (!txt || !/\d{1,2}:\d{2}/.test(txt)) continue;
-        const rows = [];
-        for (const line of txt.split("\n")) {
-          const m = line.trim().match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(\S.*)$/);
-          if (m) rows.push([toMs(m[1]), m[2].replace(/\s+/g, " ").trim()]);
-        }
-        if (rows.length > best.length) { best = rows; if (!panelPeek) panelPeek = txt.slice(0, 300); }
+        const rows = parsePanelText(txt);
+        if (!panelPeek && rows.length) panelPeek = txt.slice(0, 300);
+        if (p === specific && rows.length >= 3) return rows; // the real transcript panel wins outright
+        if (rows.length > best.length) best = rows;
       }
       return best.length >= 3 ? best : [];
     };
@@ -542,13 +557,27 @@
           }
           info.foundButton = !!btn;
           if (btn) {
-            const c = btn.tagName === "BUTTON" ? btn : (btn.querySelector && btn.querySelector("button")) || btn;
-            try { c.click(); } catch (e) {}
-            // read via the segment elements first, then fall back to parsing the panel's raw text
-            for (let i = 0; i < 40 && !segs.length; i++) {
+            const clickIt = () => {
+              const c = btn.tagName === "BUTTON" ? btn : (btn.querySelector && btn.querySelector("button")) || btn;
+              try { c.click(); } catch (e) {}
+            };
+            clickIt();
+            // read via the segment elements first, then the panel's raw text; keep polling until the
+            // transcript stops growing, so we capture the whole thing (not a half-rendered first chunk)
+            let stable = 0, reclicked = false;
+            for (let i = 0; i < 52; i++) {
               await sleep(250);
-              segs = readSegs();
-              if (!segs.length) { segs = readFromPanel(); if (segs.length) info.viaPanel = true; }
+              let r = readSegs();
+              if (!r.length) { r = readFromPanel(); if (r.length) info.viaPanel = true; }
+              if (r.length > segs.length) { segs = r; stable = 0; }
+              else if (segs.length && ++stable >= 3) break; // held steady ~0.75s → fully loaded
+              // if, after ~2s, nothing opened at all, the first click likely didn't register — retry
+              // once (but only when no transcript panel has appeared, so we never toggle an open one shut)
+              if (!segs.length && !reclicked && i === 8) {
+                const op = pdoc.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
+                const hasRows = op && /\d{1,2}:\d{2}/.test((op.innerText || op.textContent || ""));
+                if (!hasRows) { reclicked = true; btn = findBtn() || btn; clickIt(); }
+              }
             }
             // tidy up: close the panel we opened
             try {
@@ -573,7 +602,7 @@
   async function getYouTubeTranscript(browser, pageUrl) {
     const mm = browser.messageManager;
     const data = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 25000);
+      const timer = setTimeout(() => { mm.removeMessageListener(MSG, listener); reject(new Error("timeout")); }, 30000);
       const listener = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, listener); resolve(m.data); };
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
@@ -1752,5 +1781,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.26");
+  console.log("[page-summary] loaded v1.9.27");
 })();
