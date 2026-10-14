@@ -174,6 +174,7 @@
 #pgs-panel .pgs-foot { flex: none; padding: 8px 12px 12px; animation: pgs-msg 0.45s var(--pgs-ease) both; }
 #pgs-panel .pgs-foot[hidden] { display: none; }
 #pgs-panel .pgs-composer {
+  position: relative;
   display: flex; flex-direction: column; gap: 6px; padding: 12px 10px 10px 16px;
   border: 1px solid var(--pgs-line); border-radius: 14px; background: var(--pgs-soft);
   transition: border-color 0.2s ease, box-shadow 0.25s ease;
@@ -228,6 +229,16 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #pgs-panel .pgs-menu-item:hover { background: var(--pgs-soft); }
+#pgs-panel .pgs-menu-item.pgs-menu-active { background: var(--pgs-soft); }
+#pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 9px; }
+#pgs-panel .pgs-menu-fav {
+  flex: none; width: 16px; height: 16px; border-radius: 4px; object-fit: cover;
+}
+#pgs-panel .pgs-menu-fav-x {
+  display: grid; place-items: center; font-size: 9px; font-weight: 700;
+  background: color-mix(in srgb, var(--pgs-fg) 16%, transparent); color: var(--pgs-fg);
+}
+#pgs-panel .pgs-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pgs-panel .pgs-menu-sep { font-size: 11px; opacity: 0.5; padding: 8px 10px 3px; }
 #pgs-panel .pgs-addnote { font-size: 12px; opacity: 0.6; padding: 4px 2px 0; animation: pgs-fade 0.3s ease both; }
 #pgs-panel .pgs-send {
@@ -1286,6 +1297,29 @@
       if (!sticky) noteTimer = setTimeout(clearNote, 2600);
     }
 
+    // tabs that are actually loaded (skip lazy/discarded/restored-but-unloaded tabs) and on the web
+    function loadedTabs() {
+      return gBrowser.tabs.filter((t) =>
+        t !== host && t !== src && !t.pending && t.linkedPanel && t.linkedBrowser &&
+        /^https?$/.test(t.linkedBrowser.currentURI?.scheme || "")
+      );
+    }
+    // a menu row for a tab: favicon + title. mouseDown=true picks before the input loses focus (@ mode)
+    function tabItem(t, onPick, mouseDown) {
+      let fav;
+      if (t.image) fav = h("img", { className: "pgs-menu-fav", src: t.image });
+      else {
+        let ch = "?";
+        try { ch = (new URL(t.linkedBrowser.currentURI.spec).hostname.replace(/^www\./, "")[0] || "?").toUpperCase(); } catch {}
+        fav = h("span", { className: "pgs-menu-fav pgs-menu-fav-x", textContent: ch });
+      }
+      const el = h("button", { className: "pgs-menu-item pgs-menu-tab", title: t.label || "" },
+        fav, h("span", { className: "pgs-menu-label", textContent: (t.label || "Tab").slice(0, 60) }));
+      if (mouseDown) el.addEventListener("mousedown", (e) => { e.preventDefault(); onPick(t); });
+      else el.onclick = () => onPick(t);
+      return el;
+    }
+
     // "+" popover: paste text, add another open tab, or (on YouTube) grab the current moment
     let addMenuEl = null;
     const onDocDown = (e) => { if (addMenuEl && !addMenuEl.contains(e.target) && !e.target.closest(".pgs-add")) closeAddMenu(); };
@@ -1296,18 +1330,60 @@
     }
     function openAddMenu(anchor) {
       if (addMenuEl) { closeAddMenu(); return; }
+      closeMention();
       const items = [];
       const mi = (label, fn) => h("button", { className: "pgs-menu-item", textContent: label, onclick: () => { closeAddMenu(); fn(); } });
       if (ytId(srcUrl() || "")) items.push(mi("◉   This moment", addMoment));
       items.push(mi("⎘   Paste text", pasteCard));
-      const tabs = gBrowser.tabs.filter((t) => t !== host && t.linkedBrowser && /^https?$/.test(t.linkedBrowser.currentURI?.scheme || ""));
+      const tabs = loadedTabs();
       if (tabs.length) {
-        items.push(h("div", { className: "pgs-menu-sep", textContent: "Add another tab" }));
-        for (const t of tabs.slice(0, 12)) items.push(mi("▸   " + (t.label || "Tab").slice(0, 44), () => addTab(t)));
+        items.push(h("div", { className: "pgs-menu-sep", textContent: "Add another tab  ·  or type @ in the box" }));
+        for (const t of tabs.slice(0, 12)) items.push(tabItem(t, (tab) => { closeAddMenu(); addTab(tab); }));
       }
       addMenuEl = h("div", { className: "pgs-menu" }, ...items);
       anchor.parentNode.appendChild(addMenuEl);
       setTimeout(() => document.addEventListener("pointerdown", onDocDown, true), 0);
+    }
+
+    // typing "@" in the composer opens a live-filtered tab picker (@ + text narrows the list)
+    let mentionEl = null, mentionStart = -1, mentionIdx = 0, mentionTabs = [], mentionQ = "";
+    function closeMention() { if (mentionEl) { mentionEl.remove(); mentionEl = null; } mentionStart = -1; mentionTabs = []; }
+    function updateMention() {
+      if (!input) return;
+      const v = input.value, caret = input.selectionStart ?? v.length;
+      const m = v.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+      if (!m) { closeMention(); return; }
+      closeAddMenu();
+      mentionStart = caret - m[1].length - 1;
+      mentionQ = m[1].toLowerCase();
+      const all = loadedTabs();
+      mentionTabs = all
+        .filter((t) => !mentionQ || (t.label || "").toLowerCase().includes(mentionQ) || (t.linkedBrowser.currentURI?.spec || "").toLowerCase().includes(mentionQ))
+        .slice(0, 10);
+      if (!mentionTabs.length) { closeMention(); return; }
+      mentionIdx = Math.max(0, Math.min(mentionIdx, mentionTabs.length - 1));
+      renderMention();
+    }
+    function renderMention() {
+      const head = h("div", { className: "pgs-menu-sep", textContent: mentionQ ? `Tabs matching “${mentionQ}”` : "Add a tab" });
+      const rows = mentionTabs.map((t, i) => {
+        const el = tabItem(t, pickMention, true);
+        if (i === mentionIdx) el.classList.add("pgs-menu-active");
+        return el;
+      });
+      if (!mentionEl) { mentionEl = h("div", { className: "pgs-menu pgs-menu-mention" }); input.closest(".pgs-composer").appendChild(mentionEl); }
+      mentionEl.replaceChildren(head, ...rows);
+    }
+    function pickMention(t) {
+      if (mentionStart >= 0 && input) {
+        const v = input.value, caret = input.selectionStart ?? v.length;
+        input.value = v.slice(0, mentionStart) + v.slice(caret);
+        input.selectionStart = input.selectionEnd = mentionStart;
+        autosize();
+      }
+      closeMention();
+      input?.focus();
+      if (t) addTab(t);
     }
 
     // ----- request building: every request is self-contained (small local models ignore history) -----
@@ -1461,8 +1537,15 @@
       attachEl = h("div", { className: "pgs-attach", hidden: true }, stackEl);
       const isVid = !!ytId(srcUrl() || "");
       input = h("textarea", { className: "pgs-input", rows: 1, placeholder: isVid ? "Ask about this video…" : "Ask a question about this page…" });
-      input.addEventListener("input", autosize);
+      input.addEventListener("input", () => { autosize(); updateMention(); });
+      input.addEventListener("blur", () => setTimeout(closeMention, 150));
       input.addEventListener("keydown", (e) => {
+        if (mentionEl && mentionTabs.length) {
+          if (e.key === "ArrowDown") { e.preventDefault(); mentionIdx = (mentionIdx + 1) % mentionTabs.length; renderMention(); return; }
+          if (e.key === "ArrowUp") { e.preventDefault(); mentionIdx = (mentionIdx - 1 + mentionTabs.length) % mentionTabs.length; renderMention(); return; }
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); pickMention(mentionTabs[mentionIdx]); return; }
+          if (e.key === "Escape") { e.preventDefault(); closeMention(); return; }
+        }
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); submit(); }
       });
       sendBtn = h("button", { className: "pgs-send", onclick: () => (busy ? stop() : submit()) });
@@ -1704,6 +1787,7 @@
       started = false;
       ytRows = null;
       closeAddMenu();
+      closeMention();
       clearNote();
       setBusy(false);
       if (input) { input.value = ""; autosize(); }
@@ -1797,6 +1881,7 @@
       gen++;
       ctrl?.abort();
       closeAddMenu();
+      closeMention();
       try { mm?.removeMessageListener(SEL_MSG, onSelection); } catch {}
       sessions.delete(host);
       if (!panel) return;
@@ -1921,5 +2006,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.29");
+  console.log("[page-summary] loaded v1.9.30");
 })();
