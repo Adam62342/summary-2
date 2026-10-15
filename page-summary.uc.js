@@ -317,7 +317,6 @@
 #pgs-panel .pgs-att-host { font-size: 9px; opacity: 0.7; text-align: center; word-break: break-all; line-height: 1.2; }
 #pgs-panel .pgs-att-text .pgs-att-face,
 #pgs-panel .pgs-att-clip .pgs-att-face,
-#pgs-panel .pgs-att-moment .pgs-att-face { padding: 7px 7px 6px; background: color-mix(in srgb, var(--pgs-fg) 15%, var(--pgs-bg)); }
 #pgs-panel .pgs-att-tag {
   font-size: 7.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
   opacity: 0.6; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -936,19 +935,6 @@
     try { browser.messageManager.loadFrameScript("data:application/javascript," + encodeURIComponent(code), false); } catch (e) {}
   }
 
-  // read the current playback position (seconds) of the tab's <video>, for the "this moment" card
-  function getVideoTime(browser) {
-    return new Promise((resolve) => {
-      const mm = browser?.messageManager;
-      if (!mm) { resolve(0); return; }
-      const timer = setTimeout(() => { try { mm.removeMessageListener(MSG, l); } catch (e) {} resolve(0); }, 2500);
-      const l = (m) => { clearTimeout(timer); mm.removeMessageListener(MSG, l); resolve(Number(m.data?.t) || 0); };
-      mm.addMessageListener(MSG, l);
-      const code = `(() => { try { const v = content.document.querySelector("video.html5-main-video, video"); sendAsyncMessage(${JSON.stringify(MSG)}, { t: v ? v.currentTime : 0 }); } catch (e) { sendAsyncMessage(${JSON.stringify(MSG)}, { t: 0 }); } })()`;
-      try { mm.loadFrameScript("data:application/javascript," + encodeURIComponent(code), false); } catch (e) { clearTimeout(timer); resolve(0); }
-    });
-  }
-
   // seek is an optional (seconds) => void; when given, [mm:ss] / mm:ss become clickable jump links
   const inline = (s, seek) =>
     s.split(INLINE_RE).filter(Boolean).flatMap((t) => {
@@ -1085,7 +1071,6 @@
     let page = null, convo = [], refs = [], ctrl = null;
     let busy = false, gen = 0, closed = false, userHidden = false;
     let lastKey = ""; // page identity the chat currently reflects (to detect navigation to a new page/video)
-    let ytRows = null; // cached [sec, text] transcript rows for the current video (for "this moment")
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
     let members = [src]; // all tabs this chat spans — >1 when opened over a split view
     const isMember = (t) => t === host || members.includes(t);
@@ -1259,7 +1244,7 @@
       renderAttach();
     }
 
-    // add a non-selection context card (another tab, pasted text, a video moment, …)
+    // add a non-selection context card (another tab, pasted text, …)
     function addContext(item) {
       if (!item || !item.text || !item.text.trim()) return;
       refs.push({ id: ++refSeq, ...item });
@@ -1272,7 +1257,7 @@
       renderAttach();
     }
 
-    // ----- extra context sources (paste / another tab / a video moment) -----
+    // ----- extra context sources (paste / another tab) -----
     function readClipboard() {
       try {
         const xfer = Cc["@mozilla.org/widget/transferable;1"].createInstance(Ci.nsITransferable);
@@ -1357,39 +1342,6 @@
       return Promise.all(others.map((t) => addTab(t, true)));
     }
 
-    // fetch + cache the current video's timestamped transcript rows (first use pays the cost)
-    async function ensureYtRows() {
-      if (ytRows) return ytRows;
-      const data = await getYouTubeTranscript(src.linkedBrowser, srcUrl(), true);
-      const rows = [];
-      for (const ln of (data?.text || "").split("\n")) {
-        const m = ln.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*(.*)$/);
-        if (m && m[2]) rows.push([tsToSeconds(m[1]), m[2]]);
-      }
-      ytRows = rows;
-      return rows;
-    }
-    async function addMoment() {
-      const url = srcUrl();
-      if (!url || !ytId(url)) return;
-      flashNote("Grabbing this moment…", true);
-      let t = 0, rows = [];
-      try {
-        [t, rows] = await Promise.all([getVideoTime(src.linkedBrowser), ensureYtRows()]);
-      } catch (e) { flashNote("Couldn't read the transcript for this video."); return; }
-      if (!rows.length) { flashNote("No transcript available for this video."); return; }
-      const W = 30; // seconds of context on each side of the playhead
-      let near = rows.filter((r) => r[0] >= t - W && r[0] <= t + W);
-      if (!near.length) { // fall back to the few rows closest to the playhead
-        near = rows.slice().sort((a, b) => Math.abs(a[0] - t) - Math.abs(b[0] - t)).slice(0, 6).sort((a, b) => a[0] - b[0]);
-      }
-      const text = near.map((r) => r[1]).join(" ").replace(/\s+/g, " ").trim().slice(0, 2000);
-      if (!text) { flashNote("Couldn't find transcript near this point."); return; }
-      const label = `${ytTime(near[0][0] * 1000)}–${ytTime(near[near.length - 1][0] * 1000)}`;
-      clearNote();
-      addContext({ kind: "moment", label, text });
-    }
-
     // small transient line under the composer for add-context status
     let noteEl = null, noteTimer = null;
     function clearNote() { clearTimeout(noteTimer); if (noteEl) { noteEl.remove(); noteEl = null; } }
@@ -1424,7 +1376,7 @@
       return el;
     }
 
-    // "+" popover: paste text, add another open tab, or (on YouTube) grab the current moment
+    // "+" popover: paste text, or add another open tab
     let addMenuEl = null;
     const onDocDown = (e) => { if (addMenuEl && !addMenuEl.contains(e.target) && !e.target.closest(".pgs-add")) closeAddMenu(); };
     function closeAddMenu() {
@@ -1437,7 +1389,6 @@
       closeMention();
       const items = [];
       const mi = (label, fn) => h("button", { className: "pgs-menu-item", textContent: label, onclick: () => { closeAddMenu(); fn(); } });
-      if (ytId(srcUrl() || "")) items.push(mi("◉   This moment", addMoment));
       items.push(mi("⎘   Paste text", pasteCard));
       const tabs = loadedTabs();
       if (tabs.length) {
@@ -1505,11 +1456,10 @@
       }
       const header = `Title: ${page.title}\nURL: ${page.url}\n\n${ctx}`;
       const refText = (rs) => rs.map((r) => `"${r.text.slice(0, 1500)}"`).join("\n");
-      // label each attached card so the model can tell a tab from a selection from a video excerpt
+      // label each attached card so the model can tell a tab from a selection from pasted text
       const refHead = (r) =>
         r.kind === "tab" ? `ANOTHER TAB THE USER ATTACHED (${r.label || "tab"})`
         : r.kind === "clip" ? "TEXT THE USER PASTED IN"
-        : r.kind === "moment" ? `EXCERPT FROM THIS VIDEO (${r.label || "moment"})`
         : "TEXT THE USER SELECTED ON THE PAGE";
       const transcript = convo
         .slice(0, -1)
@@ -1680,7 +1630,7 @@
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); submit(); }
       });
       sendBtn = h("button", { className: "pgs-send", onclick: () => (busy ? stop() : submit()) });
-      const addBtn = h("button", { className: "pgs-add", title: "Add context (tab, pasted text, video moment)", onclick: (e) => { e.stopPropagation(); openAddMenu(addBtn); } }, "+");
+      const addBtn = h("button", { className: "pgs-add", title: "Add context (tab, pasted text)", onclick: (e) => { e.stopPropagation(); openAddMenu(addBtn); } }, "+");
       chipsEl = h("div", { className: "pgs-chips" });
       rebuildChips();
       const foot = h("div", { className: "pgs-foot" },
@@ -1920,7 +1870,6 @@
       convo = [];
       refs = [];
       started = false;
-      ytRows = null;
       closeAddMenu();
       closeMention();
       clearNote();
@@ -2158,5 +2107,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.39");
+  console.log("[page-summary] loaded v1.9.40");
 })();
