@@ -1078,7 +1078,7 @@
   const dock = { corner: "tr" }; // which corner of the page area the floating window is snapped to
 
   function makeSession(src) {
-    let panel, logEl, input, sendBtn, attachEl, stackEl, closeBtn, winBtn;
+    let panel, logEl, input, sendBtn, attachEl, stackEl, closeBtn, winBtn, chipsEl;
     let started = false, stopped = false, generating = false, dragPos = null;
     let refSeq = 0, thumbUrl = "", thumbFor = "", thumbVer = 0, thumbBusy = false, thumbTimer = null;
     const attMap = new Map(); // attachment key -> card element (the stack is updated incrementally)
@@ -1293,17 +1293,30 @@
       }
     }
 
-    // When the panel opens on top of a split view, the other split pane(s) are rendered visible
-    // alongside the active tab — make the chat span the whole split (one shared environment) and
-    // attach those tabs as context cards too.
+    // When the panel opens on top of a split view, the other split pane(s) are rendered beside the
+    // active tab — make the chat span the whole split (one shared environment) and attach those tabs
+    // as context cards too. We must only pick genuine split siblings: a sibling pane sits NEXT TO the
+    // active pane (little overlap with its rect). Background tabs that Zen still reports as "visible"
+    // are stacked in the SAME spot as the active pane (near-total overlap), so we exclude those —
+    // otherwise ⌘E would wrongly attach every open tab as a card.
     function attachSplitTabs() {
       let others = [];
       try {
-        others = gBrowser.tabs.filter((t) =>
-          t !== src && t !== host && !t.pending && t.linkedPanel && t.linkedBrowser &&
-          /^https?$/.test(t.linkedBrowser.currentURI?.scheme || "") && paneVisible(t)
-        ).slice(0, 3);
-      } catch (e) {}
+        const selR = gBrowser.selectedBrowser.getBoundingClientRect();
+        const selArea = selR.width * selR.height;
+        others = gBrowser.tabs.filter((t) => {
+          if (t === src || t === host || t.pending || !t.linkedPanel || !t.linkedBrowser) return false;
+          if (!/^https?$/.test(t.linkedBrowser.currentURI?.scheme || "")) return false;
+          if (!paneVisible(t)) return false;
+          const r = t.linkedBrowser.getBoundingClientRect();
+          const rArea = r.width * r.height;
+          if (rArea < 2500 || selArea < 2500) return false; // not actually laid out
+          // overlap between this pane and the active pane; a real neighbour barely overlaps
+          const ox = Math.max(0, Math.min(r.right, selR.right) - Math.max(r.left, selR.left));
+          const oy = Math.max(0, Math.min(r.bottom, selR.bottom) - Math.max(r.top, selR.top));
+          return ox * oy < rArea * 0.5; // < half-overlapping the active pane → genuine split sibling
+        }).slice(0, 3);
+      } catch (e) { others = []; }
       members = [src, ...others]; // chat now spans these tabs: stays visible across them, no 2nd chat
       position(); // re-anchor over the whole split, not just the active pane
       return Promise.all(others.map((t) => addTab(t)));
@@ -1591,6 +1604,18 @@
       });
     }
 
+    // Fill the chips row + placeholder for the CURRENT page type. Called from build() and whenever
+    // the page changes (newChat), so navigating e.g. YouTube → Reddit in the same tab swaps the
+    // video chips/placeholder back to the normal page ones instead of leaving stale "video" UI.
+    function rebuildChips() {
+      const isVid = !!ytId(srcUrl() || "");
+      if (input) input.placeholder = isVid ? "Ask about this video…" : "Ask a question about this page…";
+      if (!chipsEl) return;
+      chipsEl.replaceChildren(...(isVid ? YT_CHIPS : CHIPS).map(([label, q]) =>
+        h("button", { className: "pgs-chip", textContent: label, onclick: () => submit(q || pref("prompt", DEFAULT_PROMPT), { label }) })
+      ));
+    }
+
     function build() {
       const newBtn = h("button", { className: "pgs-icon", title: "New chat", onclick: () => newChat() }, icon("new"));
       closeBtn = h("button", {
@@ -1621,11 +1646,10 @@
       });
       sendBtn = h("button", { className: "pgs-send", onclick: () => (busy ? stop() : submit()) });
       const addBtn = h("button", { className: "pgs-add", title: "Add context (tab, pasted text, video moment)", onclick: (e) => { e.stopPropagation(); openAddMenu(addBtn); } }, "+");
-      const chips = h("div", { className: "pgs-chips" }, ...(isVid ? YT_CHIPS : CHIPS).map(([label, q]) =>
-        h("button", { className: "pgs-chip", textContent: label, onclick: () => submit(q || pref("prompt", DEFAULT_PROMPT), { label }) })
-      ));
+      chipsEl = h("div", { className: "pgs-chips" });
+      rebuildChips();
       const foot = h("div", { className: "pgs-foot" },
-        h("div", { className: "pgs-composer" }, attachEl, input, h("div", { className: "pgs-row" }, addBtn, chips, sendBtn)));
+        h("div", { className: "pgs-composer" }, attachEl, input, h("div", { className: "pgs-row" }, addBtn, chipsEl, sendBtn)));
 
       panel = h("div", { id: "pgs-panel" }, head, logEl, foot);
       document.documentElement.append(panel);
@@ -1868,6 +1892,7 @@
       setBusy(false);
       if (input) { input.value = ""; autosize(); }
       logEl.replaceChildren();
+      rebuildChips(); // swap chips/placeholder to match the current page (video vs normal)
       renderAttach();
       focusInput();
     }
@@ -2098,5 +2123,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.36");
+  console.log("[page-summary] loaded v1.9.37");
 })();
