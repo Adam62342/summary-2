@@ -325,6 +325,17 @@
   font-size: 7.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
   opacity: 0.6; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* selected-text / pasted cards have no thumbnail, so give them a solid fill + slight outline
+   (page/tab cards hide the face behind their screenshot, so this only affects text snippets) */
+#pgs-panel .pgs-att-text .pgs-att-face,
+#pgs-panel .pgs-att-clip .pgs-att-face {
+  opacity: 1; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--pgs-fg) 24%, transparent);
+  background: #f4f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  #pgs-panel .pgs-att-text .pgs-att-face,
+  #pgs-panel .pgs-att-clip .pgs-att-face { background: #2a2a2d; }
+}
 #pgs-panel .pgs-att-q { font: 700 22px/0.8 Georgia, serif; opacity: 0.45; margin-bottom: 3px; }
 #pgs-panel .pgs-att-snip {
   font-size: 8.5px; line-height: 1.32; opacity: 0.88; word-break: break-word; overflow: hidden;
@@ -2135,5 +2146,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.45");
+  console.log("[page-summary] loaded v1.9.46");
 })();
