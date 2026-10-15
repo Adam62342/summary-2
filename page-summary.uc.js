@@ -1203,8 +1203,9 @@
       for (const r of refs) {
         items.push({
           key: r.id,
-          sig: `${r.kind || "text"}\n${r.label || ""}\n${r.image || ""}\n${r.text}`,
-          make: () => attCard(r.kind || "text", r, () => { refs = refs.filter((x) => x.id !== r.id); renderAttach(); }),
+          sig: `${r.kind || "text"}\n${r.label || ""}\n${r.image || ""}\n${r.locked ? "L" : ""}\n${r.text}`,
+          // locked cards are split-view members — one environment, so no remove button
+          make: () => attCard(r.kind || "text", r, r.locked ? null : () => { refs = refs.filter((x) => x.id !== r.id); renderAttach(); }),
         });
       }
       const keep = new Set(items.map((i) => i.key));
@@ -1251,7 +1252,12 @@
     function addContext(item) {
       if (!item || !item.text || !item.text.trim()) return;
       refs.push({ id: ++refSeq, ...item });
-      if (refs.length > 5) refs.shift();
+      // cap at 5, but never evict a locked split-member card (those are part of the environment)
+      while (refs.length > 5) {
+        const i = refs.findIndex((r) => !r.locked);
+        if (i < 0) break;
+        refs.splice(i, 1);
+      }
       renderAttach();
     }
 
@@ -1279,7 +1285,7 @@
       addContext({ kind: "clip", label: "Pasted", text: t.slice(0, 4000) });
     }
 
-    async function addTab(tab) {
+    async function addTab(tab, locked = false) {
       if (!tab || tab === host) return;
       flashNote("Reading tab…", true);
       try {
@@ -1287,39 +1293,56 @@
         const text = (data?.text || "").replace(/\s+/g, " ").trim().slice(0, 6000);
         if (!text) { flashNote("Couldn't read that tab."); return; }
         clearNote();
-        addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text });
+        addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text, locked });
       } catch (e) {
         flashNote("Couldn't read that tab.");
       }
     }
 
-    // When the panel opens on top of a split view, the other split pane(s) are rendered beside the
-    // active tab — make the chat span the whole split (one shared environment) and attach those tabs
-    // as context cards too. We must only pick genuine split siblings: a sibling pane sits NEXT TO the
-    // active pane (little overlap with its rect). Background tabs that Zen still reports as "visible"
-    // are stacked in the SAME spot as the active pane (near-total overlap), so we exclude those —
-    // otherwise ⌘E would wrongly attach every open tab as a card.
-    function attachSplitTabs() {
-      let others = [];
+    // Find the OTHER tab(s) in the same split view as the active tab. Preferred path: ask Zen's
+    // split-view manager for the group that contains the active tab (deterministic). Fallback: a
+    // geometric test — a real split sibling is laid out BESIDE the active pane, so it barely overlaps
+    // the active pane's rect; a background tab that Zen still reports "visible" is stacked on the same
+    // spot (it fully covers the active pane) and is excluded. Never returns unrelated background tabs.
+    function splitSiblings() {
+      try {
+        const zs = window.gZenViewSplitter;
+        const groups = zs && (zs._data || zs.splitViewGroups || zs.groups);
+        if (Array.isArray(groups)) {
+          for (const g of groups) {
+            const gt = (g?.tabs || g?.tabIds || []).map((x) => (x && x.linkedBrowser ? x : x?.tab)).filter(Boolean);
+            if (gt.some((t) => t === src || t === gBrowser.selectedTab)) {
+              return gt.filter((t) => t !== src && t !== host && t.linkedBrowser && !t.pending);
+            }
+          }
+        }
+      } catch (e) {}
+      // geometry fallback
       try {
         const selR = gBrowser.selectedBrowser.getBoundingClientRect();
         const selArea = selR.width * selR.height;
-        others = gBrowser.tabs.filter((t) => {
+        if (selArea < 2500) return [];
+        return gBrowser.tabs.filter((t) => {
           if (t === src || t === host || t.pending || !t.linkedPanel || !t.linkedBrowser) return false;
           if (!/^https?$/.test(t.linkedBrowser.currentURI?.scheme || "")) return false;
           if (!paneVisible(t)) return false;
           const r = t.linkedBrowser.getBoundingClientRect();
-          const rArea = r.width * r.height;
-          if (rArea < 2500 || selArea < 2500) return false; // not actually laid out
-          // overlap between this pane and the active pane; a real neighbour barely overlaps
+          if (r.width * r.height < 2500) return false;
           const ox = Math.max(0, Math.min(r.right, selR.right) - Math.max(r.left, selR.left));
           const oy = Math.max(0, Math.min(r.bottom, selR.bottom) - Math.max(r.top, selR.top));
-          return ox * oy < rArea * 0.5; // < half-overlapping the active pane → genuine split sibling
-        }).slice(0, 3);
-      } catch (e) { others = []; }
+          return ox * oy < selArea * 0.35; // overlaps the active pane only a little → genuine neighbour
+        });
+      } catch (e) { return []; }
+    }
+
+    // When the panel opens on top of a split view, treat the whole split as ONE environment: the chat
+    // spans every pane and attaches each as a context card. Those cards are locked (no ✕) — you can't
+    // remove one half of a split, so the UX stays consistent.
+    function attachSplitTabs() {
+      const others = splitSiblings().slice(0, 3);
       members = [src, ...others]; // chat now spans these tabs: stays visible across them, no 2nd chat
       position(); // re-anchor over the whole split, not just the active pane
-      return Promise.all(others.map((t) => addTab(t)));
+      return Promise.all(others.map((t) => addTab(t, true)));
     }
 
     // fetch + cache the current video's timestamped transcript rows (first use pays the cost)
@@ -2123,5 +2146,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.37");
+  console.log("[page-summary] loaded v1.9.38");
 })();
