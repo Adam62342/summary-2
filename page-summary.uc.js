@@ -1156,15 +1156,12 @@
       return { url, label, image: src.image, thumb: thumbFor === url ? thumbUrl : "" };
     };
 
-    // a small portrait snapshot of the page, used as the card's picture
-    async function captureThumb() {
-      const url = srcUrl();
-      if (!url || thumbBusy || thumbFor === url || closed) return;
-      thumbBusy = true;
+    // snapshot any browser into a small portrait JPEG data URL (""=couldn't, caller falls back)
+    async function snapshotBrowser(b) {
       try {
-        const b = src.linkedBrowser;
+        if (!b) return "";
         const r = b.getBoundingClientRect();
-        if (r.width < 50 || r.height < 50) return;
+        if (r.width < 50 || r.height < 50) return "";
         const w = Math.min(r.width, r.height * 0.8);
         const scale = Math.min(1, 180 / w);
         const bmp = await b.drawSnapshot((r.width - w) / 2, 0, w, r.height, scale, "white");
@@ -1172,16 +1169,30 @@
         c.width = bmp.width;
         c.height = bmp.height;
         c.getContext("2d").drawImage(bmp, 0, 0);
+        const data = c.toDataURL("image/jpeg", 0.72);
+        bmp.close?.();
+        return data;
+      } catch (e) {
+        return "";
+      }
+    }
+
+    // a small portrait snapshot of the active page, used as the card's picture
+    async function captureThumb() {
+      const url = srcUrl();
+      if (!url || thumbBusy || thumbFor === url || closed) return;
+      const b = src.linkedBrowser;
+      const r = b.getBoundingClientRect();
+      if (r.width < 50 || r.height < 50) return; // not laid out yet — try again later
+      thumbBusy = true;
+      try {
+        const data = await snapshotBrowser(b);
         if (srcUrl() === url) {
-          thumbUrl = c.toDataURL("image/jpeg", 0.72);
+          thumbUrl = data; // "" is fine: the card falls back to the favicon design, no endless retry
           thumbFor = url;
           thumbVer++;
           renderAttach();
         }
-        bmp.close?.();
-      } catch (e) {
-        console.warn("[page-summary] page thumbnail unavailable", e);
-        thumbFor = url; // don't retry endlessly; the card falls back to the favicon design
       } finally {
         thumbBusy = false;
       }
@@ -1292,8 +1303,9 @@
         const data = await getPageText(tab.linkedBrowser);
         const text = (data?.text || "").replace(/\s+/g, " ").trim().slice(0, 6000);
         if (!text) { flashNote("Couldn't read that tab."); return; }
+        const thumb = await snapshotBrowser(tab.linkedBrowser); // same screenshot preview as the page card
         clearNote();
-        addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text, locked });
+        addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text, thumb, locked });
       } catch (e) {
         flashNote("Couldn't read that tab.");
       }
@@ -2146,5 +2158,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.38");
+  console.log("[page-summary] loaded v1.9.39");
 })();
