@@ -1283,6 +1283,19 @@
       }
     }
 
+    // When the panel opens on top of a split view, the other split pane(s) are rendered visible
+    // alongside the active tab — attach them as context cards too, so ⌘E grabs the whole split.
+    function attachSplitTabs() {
+      let others = [];
+      try {
+        others = gBrowser.tabs.filter((t) =>
+          t !== src && t !== host && !t.pending && t.linkedPanel && t.linkedBrowser &&
+          /^https?$/.test(t.linkedBrowser.currentURI?.scheme || "") && paneVisible(t)
+        );
+      } catch (e) {}
+      return Promise.all(others.slice(0, 3).map((t) => addTab(t)));
+    }
+
     // fetch + cache the current video's timestamped transcript rows (first use pays the cost)
     async function ensureYtRows() {
       if (ytRows) return ytRows;
@@ -1838,11 +1851,12 @@
       lastKey = srcKey();
       focusInput();
       captureThumb();
+      const splitDone = attachSplitTabs(); // grab the other split pane(s), if any
       // optional: immediately run the default summary instead of waiting for a prompt
       if (pref("autosummarize", "false") === "true" && srcUrl()) {
         const first = (ytId(srcUrl() || "") ? YT_CHIPS : CHIPS)[0];
         const q = first[1] || pref("prompt", DEFAULT_PROMPT);
-        setTimeout(() => { if (!closed && !started && !busy) submit(q, { label: first[0] }); }, 60);
+        splitDone.then(() => { if (!closed && !started && !busy) submit(q, { label: first[0] }); });
       }
     }
 
@@ -2048,5 +2062,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.33");
+  console.log("[page-summary] loaded v1.9.34");
 })();
