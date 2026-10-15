@@ -1089,6 +1089,7 @@
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
     let members = [src]; // all tabs this chat spans — >1 when opened over a split view
     const isMember = (t) => t === host || members.includes(t);
+    let wantFocus = false; // we just opened/reset and still owe the textarea focus (survives a show)
     let self = null;
     const hideTitle = `Hide (Esc or ${SHORTCUT}) — your chat is kept for this tab`;
 
@@ -1109,15 +1110,22 @@
     const nearBottom = () => logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
     const scrollDown = (smooth) => logEl?.scrollTo({ top: logEl.scrollHeight, behavior: smooth ? "smooth" : "auto" });
     const autosize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 120) + "px"; };
-    // Focus the textarea reliably: when the panel opens from the ⌘E keydown, focusing in the same
-    // tick sometimes loses out to the browser handing focus back to the page — so retry next frame
-    // and shortly after. (This is the "sometimes you can't type until you hit New chat" fix.)
+    // Focus the textarea reliably. When the panel opens from the ⌘E keydown, keyboard focus is still
+    // inside the web content (a separate focus scope), so a plain input.focus() leaves keystrokes
+    // going to the page — the "can't type until I hit New chat" bug. So we also pull focus out of the
+    // content browser and raise the chrome window, then focus, retrying across a few frames.
     function focusInput() {
       if (!input) return;
-      const go = () => { if (!closed && panel && !panel.hidden) { try { input.focus({ preventScroll: true }); } catch (e) {} } };
+      wantFocus = true;
+      const go = () => {
+        if (closed || !panel || panel.hidden) return;
+        try { gBrowser.selectedBrowser?.blur?.(); } catch (e) {} // release focus from the web page
+        try { window.focus(); } catch (e) {}
+        try { input.focus({ preventScroll: true }); } catch (e) {}
+      };
       go();
       requestAnimationFrame(go);
-      setTimeout(go, 60);
+      for (const ms of [60, 200, 400]) setTimeout(go, ms);
     }
 
     // ----- text selected on the page becomes a reference card in the composer -----
@@ -1600,6 +1608,7 @@
       const isVid = !!ytId(srcUrl() || "");
       input = h("textarea", { className: "pgs-input", rows: 1, placeholder: isVid ? "Ask about this video…" : "Ask a question about this page…" });
       input.addEventListener("input", () => { autosize(); updateMention(); });
+      input.addEventListener("focus", () => { wantFocus = false; });
       input.addEventListener("blur", () => setTimeout(closeMention, 150));
       input.addEventListener("keydown", (e) => {
         if (mentionEl && mentionTabs.length) {
@@ -1897,8 +1906,12 @@
       // stay visible while ANY tab of the split is active (so focusing the other half doesn't hide
       // the chat and can't spawn a second one), and while the panes are actually on screen
       const want = !userHidden && (host === src ? (isMember(sel) && paneVisible(host)) : dockedVisible());
+      const wasHidden = panel.hidden;
       panel.hidden = !want;
-      if (want) position();
+      if (want) {
+        position();
+        if (wasHidden && wantFocus) focusInput(); // panel just (re)appeared and still owes focus
+      }
     }
     function dismiss() { userHidden = true; sync(); }
     function restore() { userHidden = false; sync(); focusInput(); }
@@ -2085,5 +2098,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.35");
+  console.log("[page-summary] loaded v1.9.36");
 })();
