@@ -232,14 +232,14 @@
 #pgs-panel .pgs-menu-item.pgs-menu-active { background: var(--pgs-soft); }
 #pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 10px; padding-top: 5px; padding-bottom: 5px; }
 /* flat (no-tilt) mini preview card in the tab list — smaller than the composer cards */
-#pgs-panel .pgs-att-mini { position: relative; flex: none; width: 40px; height: 50px; transform: none; }
-#pgs-panel .pgs-att-mini .pgs-att-face { border-radius: 9px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--pgs-fg) 16%, transparent), 0 4px 10px rgba(0, 0, 0, 0.25); }
-#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge { left: 4px; bottom: 4px; width: 15px; height: 15px; border-radius: 5px; font-size: 8px; }
-#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge .pgs-att-fav { width: 10px; height: 10px; }
-#pgs-panel .pgs-att-mini .pgs-att-fallback { gap: 4px; }
-#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-badge { width: 21px; height: 21px; border-radius: 7px; font-size: 11px; }
-#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-fav { width: 14px; height: 14px; }
-#pgs-panel .pgs-att-mini .pgs-att-host { font-size: 7px; }
+#pgs-panel .pgs-att-mini { position: relative; flex: none; width: 32px; height: 40px; transform: none; }
+#pgs-panel .pgs-att-mini .pgs-att-face { border-radius: 7px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--pgs-fg) 16%, transparent), 0 3px 8px rgba(0, 0, 0, 0.25); }
+#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge { left: 3px; bottom: 3px; width: 12px; height: 12px; border-radius: 4px; font-size: 7px; }
+#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge .pgs-att-fav { width: 8px; height: 8px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback { gap: 3px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-badge { width: 17px; height: 17px; border-radius: 6px; font-size: 9px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-fav { width: 11px; height: 11px; }
+#pgs-panel .pgs-att-mini .pgs-att-host { font-size: 6px; }
 #pgs-panel .pgs-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pgs-panel .pgs-menu-sep { font-size: 11px; opacity: 0.5; padding: 8px 10px 3px; }
 #pgs-panel .pgs-addnote { font-size: 12px; opacity: 0.6; padding: 4px 2px 0; animation: pgs-fade 0.3s ease both; }
@@ -2122,5 +2122,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.41");
+  console.log("[page-summary] loaded v1.9.42");
 })();
