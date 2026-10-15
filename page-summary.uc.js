@@ -223,6 +223,10 @@
   border: 1px solid var(--pgs-line); border-radius: 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   animation: pgs-msg 0.22s var(--pgs-ease) both;
 }
+/* the @ tab picker sits just above the input line (positioned in JS) and is fully opaque so the
+   attached cards behind it never show through */
+#pgs-panel .pgs-menu-mention { backdrop-filter: none; -webkit-backdrop-filter: none; background: #ffffff; }
+@media (prefers-color-scheme: dark) { #pgs-panel .pgs-menu-mention { background: #1d1d1f; } }
 #pgs-panel .pgs-menu-item {
   display: block; width: 100%; text-align: left; appearance: none; border: none; cursor: pointer;
   background: transparent; color: inherit; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 9px;
@@ -1441,6 +1445,9 @@
       });
       if (!mentionEl) { mentionEl = h("div", { className: "pgs-menu pgs-menu-mention" }); input.closest(".pgs-composer").appendChild(mentionEl); }
       mentionEl.replaceChildren(head, ...rows);
+      // anchor it just above the input line (not the whole composer), so it grows upward from there
+      const composer = input.closest(".pgs-composer");
+      mentionEl.style.bottom = Math.max(8, composer.offsetHeight - input.offsetTop + 6) + "px";
     }
     function pickMention(t) {
       if (mentionStart >= 0 && input) {
@@ -2120,5 +2127,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.43");
+  console.log("[page-summary] loaded v1.9.44");
 })();
