@@ -234,7 +234,7 @@
 }
 #pgs-panel .pgs-menu-item:hover { background: var(--pgs-soft); }
 #pgs-panel .pgs-menu-item.pgs-menu-active { background: var(--pgs-soft); }
-#pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 10px; padding-top: 4px; padding-bottom: 4px; }
+#pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 10px; margin: 3px 0; padding-top: 4px; padding-bottom: 4px; }
 /* flat (no-tilt) mini preview card in the tab list — slightly smaller than the composer cards, same
    corner radius. The .pgs-att.pgs-att-mini selector outranks the base #pgs-panel .pgs-att sizing. */
 #pgs-panel .pgs-att.pgs-att-mini { position: relative; flex: none; width: 52px; height: 66px; transform: none; }
@@ -1418,8 +1418,8 @@
     }
 
     // typing "@" in the composer opens a live-filtered tab picker (@ + text narrows the list)
-    let mentionEl = null, mentionStart = -1, mentionIdx = 0, mentionTabs = [], mentionQ = "";
-    function closeMention() { if (mentionEl) { mentionEl.remove(); mentionEl = null; } mentionStart = -1; mentionTabs = []; }
+    let mentionEl = null, mentionStart = -1, mentionIdx = 0, mentionTabs = [], mentionQ = "", mentionRows = [];
+    function closeMention() { if (mentionEl) { mentionEl.remove(); mentionEl = null; } mentionStart = -1; mentionTabs = []; mentionRows = []; }
     function updateMention() {
       if (!input) return;
       const v = input.value, caret = input.selectionStart ?? v.length;
@@ -1438,16 +1438,24 @@
     }
     function renderMention() {
       const head = h("div", { className: "pgs-menu-sep", textContent: mentionQ ? `Tabs matching “${mentionQ}”` : "Add a tab" });
-      const rows = mentionTabs.map((t, i) => {
+      mentionRows = mentionTabs.map((t, i) => {
         const el = tabItem(t, pickMention, true);
         if (i === mentionIdx) el.classList.add("pgs-menu-active");
         return el;
       });
       if (!mentionEl) { mentionEl = h("div", { className: "pgs-menu pgs-menu-mention" }); input.closest(".pgs-composer").appendChild(mentionEl); }
-      mentionEl.replaceChildren(head, ...rows);
+      mentionEl.replaceChildren(head, ...mentionRows);
       // anchor it just above the input line (not the whole composer), so it grows upward from there
       const composer = input.closest(".pgs-composer");
       mentionEl.style.bottom = Math.max(8, composer.offsetHeight - input.offsetTop + 6) + "px";
+    }
+    // arrow-key navigation only moves the highlight — it must NOT rebuild the rows, or every preview
+    // card would be recreated and re-screenshotted, making the icons flicker
+    function moveMention(delta) {
+      if (!mentionRows.length) return;
+      mentionIdx = (mentionIdx + delta + mentionTabs.length) % mentionTabs.length;
+      mentionRows.forEach((el, i) => el.classList.toggle("pgs-menu-active", i === mentionIdx));
+      mentionRows[mentionIdx]?.scrollIntoView({ block: "nearest" });
     }
     function pickMention(t) {
       if (mentionStart >= 0 && input) {
@@ -1642,8 +1650,8 @@
       input.addEventListener("blur", () => setTimeout(closeMention, 150));
       input.addEventListener("keydown", (e) => {
         if (mentionEl && mentionTabs.length) {
-          if (e.key === "ArrowDown") { e.preventDefault(); mentionIdx = (mentionIdx + 1) % mentionTabs.length; renderMention(); return; }
-          if (e.key === "ArrowUp") { e.preventDefault(); mentionIdx = (mentionIdx - 1 + mentionTabs.length) % mentionTabs.length; renderMention(); return; }
+          if (e.key === "ArrowDown") { e.preventDefault(); moveMention(1); return; }
+          if (e.key === "ArrowUp") { e.preventDefault(); moveMention(-1); return; }
           if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); pickMention(mentionTabs[mentionIdx]); return; }
           if (e.key === "Escape") { e.preventDefault(); closeMention(); return; }
         }
@@ -2127,5 +2135,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.44");
+  console.log("[page-summary] loaded v1.9.45");
 })();
