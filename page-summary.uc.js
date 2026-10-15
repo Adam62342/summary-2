@@ -294,7 +294,8 @@
   position: absolute; z-index: calc(var(--i, 0) + 1);
   left: calc(15px + var(--i, 0) * 8px); top: calc(13px + var(--dy, 0px));
   transform: rotate(var(--rot, 0deg));
-  transition: left 0.5s var(--pgs-spring), transform 0.5s var(--pgs-spring);
+  translate: var(--fx, 0px) var(--fy, 0px); /* subtle cursor-follow on hover (set in JS) */
+  transition: left 0.5s var(--pgs-spring), transform 0.5s var(--pgs-spring), translate 0.16s ease;
 }
 #pgs-panel .pgs-stack:hover .pgs-att {
   left: calc(9px + var(--i, 0) * (var(--cw) + 10px));
@@ -1653,6 +1654,20 @@
 
       logEl = h("div", { className: "pgs-log" });
       stackEl = h("div", { className: "pgs-stack" });
+      // subtle "magnetic" hover: the card under the cursor drifts a few px toward it
+      stackEl.addEventListener("pointermove", (e) => {
+        const card = e.target.closest(".pgs-att");
+        for (const c of stackEl.children) if (c !== card) { c.style.removeProperty("--fx"); c.style.removeProperty("--fy"); }
+        if (!card) return;
+        const r = card.getBoundingClientRect();
+        const clamp = (v) => Math.max(-1, Math.min(1, v));
+        const M = 5; // max drift in px
+        card.style.setProperty("--fx", (clamp((e.clientX - (r.left + r.width / 2)) / (r.width / 2)) * M).toFixed(1) + "px");
+        card.style.setProperty("--fy", (clamp((e.clientY - (r.top + r.height / 2)) / (r.height / 2)) * M).toFixed(1) + "px");
+      });
+      stackEl.addEventListener("pointerleave", () => {
+        for (const c of stackEl.children) { c.style.removeProperty("--fx"); c.style.removeProperty("--fy"); }
+      });
       attachEl = h("div", { className: "pgs-attach", hidden: true }, stackEl);
       const isVid = !!ytId(srcUrl() || "");
       input = h("textarea", { className: "pgs-input", rows: 1, placeholder: isVid ? "Ask about this video…" : "Ask a question about this page…" });
@@ -2146,5 +2161,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.47");
+  console.log("[page-summary] loaded v1.9.48");
 })();
