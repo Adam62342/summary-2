@@ -1087,6 +1087,8 @@
     let lastKey = ""; // page identity the chat currently reflects (to detect navigation to a new page/video)
     let ytRows = null; // cached [sec, text] transcript rows for the current video (for "this moment")
     let host = src; // the tab hosting the panel (changes when popped into its own split tab)
+    let members = [src]; // all tabs this chat spans — >1 when opened over a split view
+    const isMember = (t) => t === host || members.includes(t);
     let self = null;
     const hideTitle = `Hide (Esc or ${SHORTCUT}) — your chat is kept for this tab`;
 
@@ -1284,16 +1286,19 @@
     }
 
     // When the panel opens on top of a split view, the other split pane(s) are rendered visible
-    // alongside the active tab — attach them as context cards too, so ⌘E grabs the whole split.
+    // alongside the active tab — make the chat span the whole split (one shared environment) and
+    // attach those tabs as context cards too.
     function attachSplitTabs() {
       let others = [];
       try {
         others = gBrowser.tabs.filter((t) =>
           t !== src && t !== host && !t.pending && t.linkedPanel && t.linkedBrowser &&
           /^https?$/.test(t.linkedBrowser.currentURI?.scheme || "") && paneVisible(t)
-        );
+        ).slice(0, 3);
       } catch (e) {}
-      return Promise.all(others.slice(0, 3).map((t) => addTab(t)));
+      members = [src, ...others]; // chat now spans these tabs: stays visible across them, no 2nd chat
+      position(); // re-anchor over the whole split, not just the active pane
+      return Promise.all(others.map((t) => addTab(t)));
     }
 
     // fetch + cache the current video's timestamped transcript rows (first use pays the cost)
@@ -1480,6 +1485,20 @@
       c.includes("l") ? r.left + MARGIN : r.right - w - MARGIN,
       c.includes("t") ? r.top + MARGIN : r.bottom - hgt - MARGIN,
     ];
+    // the content area to float over: the selected pane normally, or the union of all split panes
+    // so the panel sits over the whole split rather than being trapped in one half
+    const contentRect = () => {
+      if (members.length <= 1) return gBrowser.selectedBrowser.getBoundingClientRect();
+      let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity;
+      for (const t of members) {
+        const b = t.linkedBrowser; if (!b) continue;
+        const r = b.getBoundingClientRect();
+        if (r.width < 50 || r.height < 50) continue;
+        L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom);
+      }
+      return L === Infinity ? gBrowser.selectedBrowser.getBoundingClientRect()
+        : { left: L, top: T, right: R, bottom: B, width: R - L, height: B - T };
+    };
 
     function position() {
       if (!panel) return;
@@ -1491,7 +1510,7 @@
         });
         return;
       }
-      const r = gBrowser.selectedBrowser.getBoundingClientRect();
+      const r = contentRect();
       const { w, hgt } = sizeFor(r);
       let left, top;
       if (dragPos) { // being dragged: follow the pointer, stay on screen
@@ -1874,7 +1893,10 @@
     }
     function sync() {
       if (!panel || closed) return;
-      const want = !userHidden && (host === src ? src === gBrowser.selectedTab : dockedVisible());
+      const sel = gBrowser.selectedTab;
+      // stay visible while ANY tab of the split is active (so focusing the other half doesn't hide
+      // the chat and can't spawn a second one), and while the panes are actually on screen
+      const want = !userHidden && (host === src ? (isMember(sel) && paneVisible(host)) : dockedVisible());
       panel.hidden = !want;
       if (want) position();
     }
@@ -1948,6 +1970,7 @@
 
     self = {
       open, sync, dismiss, restore, position, close, pop, unpop, wipe, refreshAttach, onNav,
+      has: (t) => isMember(t),
       get docked() { return host !== src; },
       get host() { return host; },
       get src() { return src; },
@@ -1967,7 +1990,7 @@
     return cs.display !== "none" && cs.visibility !== "hidden" && r.width > 100 && r.height > 100;
   };
   const current = () =>
-    [...sessions.values()].find((x) => x.host === gBrowser.selectedTab || x.src === gBrowser.selectedTab);
+    [...sessions.values()].find((x) => x.has(gBrowser.selectedTab));
 
   // while a chat lives in its own split tab, keep it glued to its pane (split animations, resizes…)
   let ticker = null;
@@ -2062,5 +2085,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.34");
+  console.log("[page-summary] loaded v1.9.35");
 })();
