@@ -1696,10 +1696,9 @@
             else if (acc.length - shown >= 500) { lastPaint = now; paint(); } // one very long line
             else if (acc.length > shown && now - lastPaint >= 1800) { lastPaint = now; paint(); } // slow model, show life
           }
-          paint(); // flush the trailing partial chunk
-          const cleaned = clean(acc); // drop any timestamps invented past the end of the video
-          if (cleaned !== acc) { acc = cleaned; renderMd(answerEl, acc, seek); }
-          else acc = cleaned;
+          paint(); // flush the trailing partial chunk (fades the last lines in)
+          acc = clean(acc); // drop any timestamps invented past the end of the video
+          renderMd(answerEl, acc, seek); // final solid pass, no fade boundary — so bold/links/timestamps never split mid-token
         }
         if (acc) convo.push({ role: "assistant", content: acc });
       } catch (e) {
@@ -2049,5 +2048,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.32");
+  console.log("[page-summary] loaded v1.9.33");
 })();
