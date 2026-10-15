@@ -230,14 +230,16 @@
 }
 #pgs-panel .pgs-menu-item:hover { background: var(--pgs-soft); }
 #pgs-panel .pgs-menu-item.pgs-menu-active { background: var(--pgs-soft); }
-#pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 9px; }
-#pgs-panel .pgs-menu-fav {
-  flex: none; width: 16px; height: 16px; border-radius: 4px; object-fit: cover;
-}
-#pgs-panel .pgs-menu-fav-x {
-  display: grid; place-items: center; font-size: 9px; font-weight: 700;
-  background: color-mix(in srgb, var(--pgs-fg) 16%, transparent); color: var(--pgs-fg);
-}
+#pgs-panel .pgs-menu-tab { display: flex; align-items: center; gap: 10px; padding-top: 5px; padding-bottom: 5px; }
+/* flat (no-tilt) mini preview card in the tab list — smaller than the composer cards */
+#pgs-panel .pgs-att-mini { position: relative; flex: none; width: 40px; height: 50px; transform: none; }
+#pgs-panel .pgs-att-mini .pgs-att-face { border-radius: 9px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--pgs-fg) 16%, transparent), 0 4px 10px rgba(0, 0, 0, 0.25); }
+#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge { left: 4px; bottom: 4px; width: 15px; height: 15px; border-radius: 5px; font-size: 8px; }
+#pgs-panel .pgs-att-mini .pgs-att-face > .pgs-att-badge .pgs-att-fav { width: 10px; height: 10px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback { gap: 4px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-badge { width: 21px; height: 21px; border-radius: 7px; font-size: 11px; }
+#pgs-panel .pgs-att-mini .pgs-att-fallback .pgs-att-fav { width: 14px; height: 14px; }
+#pgs-panel .pgs-att-mini .pgs-att-host { font-size: 7px; }
 #pgs-panel .pgs-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pgs-panel .pgs-menu-sep { font-size: 11px; opacity: 0.5; padding: 8px 10px 3px; }
 #pgs-panel .pgs-addnote { font-size: 12px; opacity: 0.6; padding: 4px 2px 0; animation: pgs-fade 0.3s ease both; }
@@ -1225,9 +1227,10 @@
           el = nel;
         }
         el._sig = it.sig;
+        const solo = items.length <= 1; // a lone card sits flat and centered — no tilt
         el.style.setProperty("--i", String(idx));
-        el.style.setProperty("--rot", `${ATT_ROT[idx % ATT_ROT.length]}deg`);
-        el.style.setProperty("--dy", `${ATT_DY[idx % ATT_DY.length]}px`);
+        el.style.setProperty("--rot", solo ? "0deg" : `${ATT_ROT[idx % ATT_ROT.length]}deg`);
+        el.style.setProperty("--dy", solo ? "0px" : `${ATT_DY[idx % ATT_DY.length]}px`);
       });
       stackEl.style.setProperty("--n", String(Math.max(1, items.length)));
       attachEl.hidden = !items.length;
@@ -1360,17 +1363,29 @@
         /^https?$/.test(t.linkedBrowser.currentURI?.scheme || "")
       );
     }
-    // a menu row for a tab: favicon + title. mouseDown=true picks before the input loses focus (@ mode)
+    // a small, flat (no-tilt) preview card for a tab — same design as the chat cards, screenshot
+    // fills in asynchronously (favicon fallback until then), just like the composer cards
+    function tabCardMini(t) {
+      const url = t.linkedBrowser.currentURI?.spec || "";
+      const card = attCard("tab", { label: t.label || "", image: t.image || "", url, thumb: "" });
+      card.classList.add("pgs-att-mini");
+      snapshotBrowser(t.linkedBrowser).then((data) => {
+        if (!data) return;
+        const face = card.querySelector(".pgs-att-face");
+        if (!face) return;
+        face.textContent = ""; // drop the favicon fallback
+        face.style.backgroundImage = `url("${data}")`;
+        const badge = h("div", { className: "pgs-att-badge" });
+        if (t.image) badge.append(h("img", { className: "pgs-att-fav", src: t.image }));
+        else { let hn = ""; try { hn = new URL(url).hostname.replace(/^www\./, ""); } catch {} badge.textContent = (hn[0] || "?").toUpperCase(); }
+        face.append(badge);
+      });
+      return card;
+    }
+    // a menu row for a tab: preview card + title. mouseDown=true picks before the input loses focus (@ mode)
     function tabItem(t, onPick, mouseDown) {
-      let fav;
-      if (t.image) fav = h("img", { className: "pgs-menu-fav", src: t.image });
-      else {
-        let ch = "?";
-        try { ch = (new URL(t.linkedBrowser.currentURI.spec).hostname.replace(/^www\./, "")[0] || "?").toUpperCase(); } catch {}
-        fav = h("span", { className: "pgs-menu-fav pgs-menu-fav-x", textContent: ch });
-      }
       const el = h("button", { className: "pgs-menu-item pgs-menu-tab", title: t.label || "" },
-        fav, h("span", { className: "pgs-menu-label", textContent: (t.label || "Tab").slice(0, 60) }));
+        tabCardMini(t), h("span", { className: "pgs-menu-label", textContent: (t.label || "Tab").slice(0, 60) }));
       if (mouseDown) el.addEventListener("mousedown", (e) => { e.preventDefault(); onPick(t); });
       else el.onclick = () => onPick(t);
       return el;
@@ -2107,5 +2122,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.40");
+  console.log("[page-summary] loaded v1.9.41");
 })();
