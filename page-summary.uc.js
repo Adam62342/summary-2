@@ -27,7 +27,7 @@
   // shown instead of CHIPS when the panel is open on a YouTube video
   const YT_CHIPS = [
     ["Summarize", "Summarize this video in 5-7 concise bullet points. Do not include any timestamps."],
-    ["Key moments", "Identify the most important moments across the ENTIRE video, from start to finish. Give 6-10 bullets total — never one per line, and do not stop partway through. Group related content into a single moment. Begin each bullet with that moment's [mm:ss] timestamp, then a short one-line description. Bold at most one key term per bullet."],
+    ["Key moments", "Identify the most important moments across the ENTIRE video, from start to finish. Give 6-10 bullets total — never one per line, and do not stop partway through. Group related content into a single moment. Begin each bullet with the [mm:ss] timestamp of the transcript line where that moment STARTS (the line whose text is about it, not the line before), then a short one-line description. If the transcript marks chapters with (Chapter: name), use one bullet per chapter with that chapter line's own timestamp. Bold at most one key term per bullet."],
     ["Takeaways", "What are the main takeaways from this video? Answer in a few concise bullet points with no timestamps."],
     ["TL;DR", "Give a two-sentence TL;DR of this video. No timestamps."],
   ];
@@ -497,6 +497,15 @@
       let hosts = toArr(pdoc.querySelectorAll("ytd-transcript-segment-renderer, yt-transcript-segment-renderer"));
       if (!hosts.length) hosts = toArr(pdoc.querySelectorAll("[class*='transcript-segment-renderer'], [class*='transcript-segment']"));
       hostCount = hosts.length;
+      // chapter headers render as separate elements between segments; map each to the segment after it
+      const heads = toArr(pdoc.querySelectorAll("ytd-transcript-section-header-renderer, [class*='transcript-section-header']"));
+      const headFor = new Map();
+      for (const hd of heads) {
+        const title = ((hd.innerText || hd.textContent) || "").replace(/\s+/g, " ").trim();
+        if (!title) continue;
+        const next = hosts.find((s) => hd.compareDocumentPosition(s) & 4); // first segment after the header
+        if (next && !headFor.has(next)) headFor.set(next, title.slice(0, 120));
+      }
       const out = [];
       for (const n of hosts) {
         const tsEl = n.querySelector(".segment-timestamp, [class*='timestamp']");
@@ -510,26 +519,34 @@
           if (m) { ts = ts || m[1]; raw = m[2]; }
         }
         raw = raw.trim();
-        if (raw) out.push([toMs(ts), raw]);
+        if (raw) out.push(headFor.has(n) ? [toMs(ts), raw, headFor.get(n)] : [toMs(ts), raw]);
       }
       return out;
     };
     // DOM-tag-agnostic fallback: read the opened transcript panel's text and parse every line that
     // starts with an mm:ss timestamp. Survives YouTube renaming its segment elements.
-    // Parse a transcript panel's visible text into [ms, text] rows. Handles both layouts: timestamp
-    // and text on one line ("0:04 hello"), AND timestamp on its own line with the text following it
-    // (YouTube commonly renders it that way) — otherwise we'd read zero rows and report "no captions".
+    // Parse a transcript panel's visible text into [ms, text, chapter?] rows. Handles both layouts:
+    // timestamp and text on one line ("0:04 hello"), AND timestamp on its own line with the text
+    // following it. Chapter headings ("Intro", "Topic 2") also appear in the panel as lines with no
+    // timestamp, sitting just BEFORE the chapter's first line. Each row takes exactly one text line;
+    // any extra non-timestamp lines are held and given to the NEXT timestamp as its chapter. Gluing
+    // them onto the previous row put every chapter under the previous chapter's timestamp.
+    const DUR_RE = /^(\d+\s*(hours?|minutes?|seconds?|hodin[ay]?|minut[ay]?|sekund[ay]?)[,\s]*)+$/i; // a11y "4 seconds"
     const parsePanelText = (txt) => {
       const rows = [];
-      let cur = null;
+      let cur = null, pending = [];
       for (const raw of txt.split("\n")) {
         const line = raw.trim();
-        if (!line) continue;
+        if (!line || DUR_RE.test(line)) continue;
         const m = line.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*(.*)$/);
-        if (m) { if (cur) rows.push(cur); cur = [toMs(m[1]), m[2].trim()]; }
-        else if (cur) cur[1] = (cur[1] + " " + line).replace(/\s+/g, " ").trim();
+        if (m) {
+          if (cur) rows.push(cur);
+          cur = [toMs(m[1]), m[2].trim()];
+          if (pending.length) { cur[2] = pending.join(" ").slice(0, 120); pending = []; }
+        } else if (cur && !cur[1]) cur[1] = line; // the text line right after its timestamp
+        else if (cur) pending.push(line);          // extra line → heading of the next chapter
       }
-      if (cur) rows.push(cur);
+      if (cur) { if (pending.length) cur[1] = (cur[1] + " " + pending.join(" ")).trim(); rows.push(cur); }
       return rows.filter((r) => r[1]); // drop stray timestamps that never got any text
     };
     const readFromPanel = () => {
@@ -678,14 +695,18 @@
     const title = data.title || "YouTube video";
     // merge the granular ~2s caption lines into larger blocks: far less text (faster for a local
     // model) and far fewer timestamps, so a plain summary stays clean and "key moments" groups
-    // naturally instead of firing a bullet every few seconds
+    // naturally instead of firing a bullet every few seconds. A chapter start always opens a new
+    // block (labelled with the chapter name), so each chapter keeps its own exact timestamp.
     const blocks = [];
     let cur = null;
-    for (const [t, text] of segs) {
-      if (!cur || t - cur.t > 40000 || cur.text.length > 400) { cur = { t, text }; blocks.push(cur); }
+    for (const [t, text, chapter] of segs) {
+      if (!cur || chapter || t - cur.t > 40000 || cur.text.length > 400) { cur = { t, text, chapter }; blocks.push(cur); }
       else cur.text += " " + text;
     }
-    const lines = blocks.map((b) => (stamps ? `[${ytTime(b.t)}] ${b.text}` : b.text));
+    const lines = blocks.map((b) => {
+      const body = (b.chapter ? `(Chapter: ${b.chapter}) ` : "") + b.text;
+      return stamps ? `[${ytTime(b.t)}] ${body}` : body;
+    });
     // the video's real length — used to tell the model its upper bound and to drop any
     // timestamp it invents beyond the end of the video
     const seconds = data.seconds || (blocks.length ? Math.round(blocks[blocks.length - 1].t / 1000) : 0);
@@ -902,6 +923,8 @@
     const scored = units
       .map((u, i) => {
         const ws = words(u);
+        // chapter starts are always kept: they carry the exact timestamps "key moments" relies on
+        if (/^\[[\d:]+\] \(Chapter: /.test(u)) return { u, i, score: Infinity };
         return { u, i, score: ws.reduce((a, w) => a + (freq.get(w) || 0), 0) / Math.sqrt(ws.length || 1) };
       })
       .sort((a, b) => b.score - a.score);
@@ -1307,6 +1330,8 @@
         if (!text) { flashNote("Couldn't read that tab."); return; }
         const thumb = await snapshotBrowser(tab.linkedBrowser); // same screenshot preview as the page card
         clearNote();
+        // a split pane is attached once — skip if a quick double "new chat" already re-added it
+        if (locked && refs.some((r) => r.locked && r.url === data.url)) return;
         addContext({ kind: "tab", label: tab.label || data.title || "Tab", image: tab.image || "", url: data.url, text, thumb, locked });
       } catch (e) {
         flashNote("Couldn't read that tab.");
@@ -1917,7 +1942,9 @@
       generate();
     }
 
-    function newChat() {
+    // keepSplit: re-attach the other split pane(s) as locked cards (the split stays one environment).
+    // open() passes false because it re-detects the split itself right after.
+    function newChat(keepSplit = true) {
       ctrl?.abort();
       gen++;
       page = null;
@@ -1932,13 +1959,18 @@
       logEl.replaceChildren();
       rebuildChips(); // swap chips/placeholder to match the current page (video vs normal)
       renderAttach();
+      if (keepSplit) {
+        const others = members.filter((t) => t !== src && t.linkedBrowser && gBrowser.tabs.includes(t));
+        members = [src, ...others];
+        others.forEach((t) => addTab(t, true));
+      }
       focusInput();
     }
 
     // open an empty chat; the page is attached to the text field, nothing is read or sent until you ask
     function open() {
       if (!panel) build();
-      newChat();
+      newChat(false);
       lastKey = srcKey();
       focusInput();
       captureThumb();
@@ -2161,5 +2193,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.48");
+  console.log("[page-summary] loaded v1.9.49");
 })();
