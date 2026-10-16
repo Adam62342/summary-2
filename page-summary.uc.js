@@ -27,7 +27,7 @@
   // shown instead of CHIPS when the panel is open on a YouTube video
   const YT_CHIPS = [
     ["Summarize", "Summarize this video in 5-7 concise bullet points. Do not include any timestamps."],
-    ["Key moments", "Identify the most important moments across the ENTIRE video, from start to finish. Give 6-10 bullets total — never one per line, and do not stop partway through. Group related content into a single moment. Begin each bullet with the [mm:ss] timestamp of the transcript line where that moment STARTS (the line whose text is about it, not the line before), then a short one-line description. If the transcript marks chapters with (Chapter: name), use one bullet per chapter with that chapter line's own timestamp. Bold at most one key term per bullet."],
+    ["Key moments", "Identify the most important moments across the ENTIRE video, from start to finish. Give 6-10 bullets total — never one per line, and do not stop partway through. Group related content into a single moment. Begin each bullet with the [mm:ss] timestamp of the transcript line where that moment STARTS (the line whose text is about it, not the line before), then a short one-line description. If a Chapters list is given, give one bullet per chapter, starting with exactly that chapter's listed time and naming the chapter. Bold at most one key term per bullet."],
     ["Takeaways", "What are the main takeaways from this video? Answer in a few concise bullet points with no timestamps."],
     ["TL;DR", "Give a two-sentence TL;DR of this video. No timestamps."],
   ];
@@ -604,6 +604,40 @@
       return false;
     };
 
+    // The video's real chapter list as [[ms, title], …] — the authoritative start time of every topic.
+    // Source 1: YouTube's chapter cards (ytd-macro-markers-list-item-renderer: title + time).
+    // Source 2: "0:00 Intro" style lines in the description, which is where chapters come from.
+    const readChapters = () => {
+      const valid = (list) => {
+        const seen = new Set(), out = [];
+        for (const c of list) if (c[1] && !seen.has(c[0])) { seen.add(c[0]); out.push(c); }
+        out.sort((a, b) => a[0] - b[0]);
+        return out.length >= 2 ? out : [];
+      };
+      try {
+        const cards = toArr(pdoc.querySelectorAll("ytd-macro-markers-list-item-renderer")).map((n) => {
+          const tEl = n.querySelector("#time"), hEl = n.querySelector("h4, #title, #details");
+          const ts = ((tEl && (tEl.textContent || "")) || "").trim();
+          const title = ((hEl && (hEl.textContent || "")) || "").replace(/\s+/g, " ").trim();
+          return /^\d{1,2}:\d{2}(:\d{2})?$/.test(ts) ? [toMs(ts), title.slice(0, 120)] : null;
+        }).filter(Boolean);
+        const fromCards = valid(cards);
+        if (fromCards.length) return fromCards;
+      } catch (e) {}
+      try {
+        const d = pdoc.querySelector("ytd-watch-metadata #description-inline-expander, #description-inline-expander, ytd-text-inline-expander, #description");
+        const txt = (d && d.textContent) || "";
+        const lines = [];
+        for (const raw of txt.split("\n")) {
+          const m = raw.trim().match(/^[([]?(\d{1,2}:\d{2}(?::\d{2})?)[)\]]?\s*[-–—:|.]?\s*(.{2,})$/);
+          if (m) lines.push([toMs(m[1]), m[2].replace(/\s+/g, " ").trim().slice(0, 120)]);
+        }
+        const fromDesc = valid(lines);
+        if (fromDesc.length && fromDesc[0][0] === 0) return fromDesc; // real chapter lists start at 0:00
+      } catch (e) {}
+      return [];
+    };
+
     (async () => {
       const info = { youtube: true, url: pdoc.location.href, title: (pdoc.title || "").replace(/\s*[-–—]\s*YouTube\s*$/, "") };
       try {
@@ -666,6 +700,7 @@
         info.hostCount = hostCount;
         info.panelPeek = panelPeek;
         info.segs = segs;
+        try { info.chapters = readChapters(); } catch (e) { info.chapters = []; }
         if (!segs.length) info.noPanel = true;
         send(info);
       } catch (e) {
@@ -683,7 +718,7 @@
       mm.addMessageListener(MSG, listener);
       mm.loadFrameScript("data:application/javascript," + encodeURIComponent(`(${extractYouTubeTranscript.toString()})()`), false);
     });
-    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, expanded: data?.expanded, triedMenu: data?.triedMenu, viaPanel: data?.viaPanel, noPanel: data?.noPanel, panelPeek: data?.panelPeek, error: data?.error });
+    console.log("[page-summary] yt transcript:", { segments: data?.segs?.length || 0, chapters: data?.chapters?.length || 0, segmentRows: data?.hostCount, foundButton: data?.foundButton, expanded: data?.expanded, triedMenu: data?.triedMenu, viaPanel: data?.viaPanel, noPanel: data?.noPanel, panelPeek: data?.panelPeek, error: data?.error });
     if (data?.error) throw new Error(data.error);
     const segs = data?.segs || [];
     if (!segs.length) {
@@ -697,12 +732,23 @@
     // model) and far fewer timestamps, so a plain summary stays clean and "key moments" groups
     // naturally instead of firing a bullet every few seconds. A chapter start always opens a new
     // block (labelled with the chapter name), so each chapter keeps its own exact timestamp.
+    // Real chapters (from YouTube's chapter list) win over headings guessed from the panel text.
+    const chapters = (data.chapters || []).filter((c) => Array.isArray(c) && c[1]);
+    // the chapter that STARTS at segment i (its first line), as [startMs, title], or undefined
+    const chapterAt = (t, i) => {
+      if (!chapters.length) return segs[i][2] ? [t, segs[i][2]] : undefined;
+      const prev = i ? segs[i - 1][0] : -1;
+      return chapters.find((c) => c[0] > prev && c[0] <= t) || (i === 0 ? chapters[0] : undefined);
+    };
     const blocks = [];
     let cur = null;
-    for (const [t, text, chapter] of segs) {
-      if (!cur || chapter || t - cur.t > 40000 || cur.text.length > 400) { cur = { t, text, chapter }; blocks.push(cur); }
+    segs.forEach(([t, text], i) => {
+      const ch = chapterAt(t, i);
+      // a chapter block uses the chapter's exact start time, so the stamp matches YouTube's own
+      if (ch) { cur = { t: Math.min(t, ch[0]), text, chapter: ch[1] }; blocks.push(cur); }
+      else if (!cur || t - cur.t > 40000 || cur.text.length > 400) { cur = { t, text }; blocks.push(cur); }
       else cur.text += " " + text;
-    }
+    });
     const lines = blocks.map((b) => {
       const body = (b.chapter ? `(Chapter: ${b.chapter}) ` : "") + b.text;
       return stamps ? `[${ytTime(b.t)}] ${body}` : body;
@@ -714,9 +760,13 @@
       `Video title: ${title}` +
       (data.author ? `\nChannel: ${data.author}` : "") +
       (seconds ? `\nLength: ${ytTime(seconds * 1000)} (the video ends at ${ytTime(seconds * 1000)} — no timestamp can be later than this)` : "") +
+      (chapters.length && stamps
+        ? `\nChapters (exact start times — a topic's timestamp is the time of ITS OWN chapter, never the one before):\n` +
+          chapters.map((c) => `[${ytTime(c[0])}] ${c[1]}`).join("\n")
+        : "") +
       `\n\nThis is the spoken transcript of the video` +
       (stamps ? " (each line is prefixed with its real [mm:ss] timestamp — only ever cite timestamps copied exactly from these lines)" : "") + ":\n";
-    return { title, url: pageUrl, text: head + lines.join("\n"), youtube: true, seconds };
+    return { title, url: pageUrl, text: head + lines.join("\n"), youtube: true, seconds, chapters };
   }
 
   async function getPageText(browser) {
@@ -1036,6 +1086,33 @@
         list = null;
       }
     }
+  }
+
+  // The small model tends to give a topic the start time of the PREVIOUS chapter, because hosts
+  // introduce the next topic at the end of the current one. When the video has real chapters, match
+  // each bullet to the chapter it's about (by the chapter title's words) and swap in that
+  // chapter's exact start time. Words shared by many titles ("hypothesis") count for less.
+  function snapToChapters(text, chapters) {
+    if (!chapters || chapters.length < 2) return text;
+    const words = (s) => (s.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []);
+    const titleWords = chapters.map((c) => [...new Set(words(c[1]))]);
+    const df = new Map();
+    for (const ws of titleWords) for (const w of ws) df.set(w, (df.get(w) || 0) + 1);
+    const LEAD = /^(\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*)?\[?)(\d{1,2}:\d{2}(?::\d{2})?)(\]?)/;
+    return text.split("\n").map((ln) => {
+      const m = ln.match(LEAD);
+      if (!m) return ln;
+      const body = ln.slice(m[0].length).toLowerCase();
+      const orig = tsToSeconds(m[2]) * 1000;
+      let best = -1, bestScore = 0;
+      chapters.forEach((c, i) => {
+        let s = 0;
+        for (const w of titleWords[i]) if (body.includes(w)) s += 1 / df.get(w);
+        if (s > bestScore || (s === bestScore && s > 0 && Math.abs(c[0] - orig) < Math.abs(chapters[best][0] - orig))) { best = i; bestScore = s; }
+      });
+      if (best < 0 || bestScore < 0.5) return ln; // no confident match — leave the model's stamp
+      return m[1] + ytTime(chapters[best][0]) + m[3] + ln.slice(m[0].length);
+    }).join("\n");
   }
 
   // The local model likes to invent [mm:ss] stamps past the end of the video. Scrub the answer
@@ -1787,7 +1864,9 @@
       const seek = ytId(srcUrl() || "") ? (s) => seekVideo(src.linkedBrowser, s) : null;
       // did this request actually ask for timestamps? (mirrors the context stripping in requestFor)
       const wantTs = /\btimestamp|\bmoment|\bchapter|time ?code|mm:ss|\bjump to\b/i.test(convo.at(-1)?.content || "");
-      const clean = (t) => (page?.youtube && seek ? scrubStamps(t, page.seconds, wantTs) : t);
+      const clean = (t) => (page?.youtube && seek
+        ? scrubStamps(wantTs ? snapToChapters(t, page.chapters) : t, page.seconds, wantTs)
+        : t);
       const dropDots = () => { if (dots) { dots.remove(); dots = null; } };
       // Reveal the answer in whole multi-line chunks: hold streamed text back until ~3 lines have
       // piled up, then render up to `end` and ease the new block in together (settled text stays
@@ -2193,5 +2272,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.49");
+  console.log("[page-summary] loaded v1.9.50");
 })();
