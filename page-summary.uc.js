@@ -197,6 +197,7 @@
   box-shadow: none !important;
   resize: none; width: 100%; box-sizing: border-box; color: inherit;
   font: inherit; margin: 0; padding: 0 !important; max-height: 120px;
+  min-height: 1.4em; /* always at least one line tall, even if sizing ran while hidden */
   scrollbar-width: none;
 }
 #pgs-panel .pgs-input::placeholder { color: inherit; opacity: 0.45; }
@@ -1210,7 +1211,14 @@
     };
     const nearBottom = () => logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
     const scrollDown = (smooth) => logEl?.scrollTo({ top: logEl.scrollHeight, behavior: smooth ? "smooth" : "auto" });
-    const autosize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 120) + "px"; };
+    // grow the text box with its content. If the panel isn't laid out yet (hidden while opening or
+    // waiting for its tab), scrollHeight reads 0 — don't lock the box at 0px, or it vanishes.
+    const autosize = () => {
+      if (!input) return;
+      input.style.height = "auto";
+      const sh = input.scrollHeight;
+      input.style.height = sh > 0 ? Math.min(sh, 120) + "px" : "";
+    };
     // Focus the textarea reliably. When the panel opens from the ⌘E keydown, keyboard focus is still
     // inside the web content (a separate focus scope), so a plain input.focus() leaves keystrokes
     // going to the page — the "can't type until I hit New chat" bug. So we also pull focus out of the
@@ -2084,6 +2092,7 @@
       panel.hidden = !want;
       if (want) {
         position();
+        if (wasHidden) autosize(); // re-measure now that it's laid out (a hidden measure reads 0)
         if (wasHidden && wantFocus) focusInput(); // panel just (re)appeared and still owes focus
       }
     }
@@ -2272,5 +2281,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.50");
+  console.log("[page-summary] loaded v1.9.51");
 })();
