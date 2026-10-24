@@ -56,8 +56,7 @@
   overflow: hidden;
   color: var(--pgs-fg);
   font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: color-mix(in srgb, var(--pgs-bg) 94%, transparent);
-  backdrop-filter: blur(30px) saturate(1.5);
+  background: #ffffff; /* fully opaque — the page never shows through (dark value below) */
   border: 1px solid var(--pgs-line);
   border-radius: 22px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.2);
@@ -220,13 +219,16 @@
 #pgs-panel .pgs-menu {
   position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 10; min-width: 220px; max-width: 300px;
   max-height: 320px; overflow-y: auto; scrollbar-width: thin; padding: 6px;
-  background: color-mix(in srgb, var(--pgs-bg) 96%, transparent); backdrop-filter: blur(30px) saturate(1.5);
+  background: #ffffff;
   border: 1px solid var(--pgs-line); border-radius: 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   animation: pgs-msg 0.22s var(--pgs-ease) both;
 }
 /* the @ tab picker sits just above the input line (positioned in JS) and is fully opaque so the
    attached cards behind it never show through */
 #pgs-panel .pgs-menu-mention { backdrop-filter: none; -webkit-backdrop-filter: none; background: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  #pgs-panel, #pgs-panel .pgs-menu { background: #1d1d1f; }
+}
 @media (prefers-color-scheme: dark) { #pgs-panel .pgs-menu-mention { background: #1d1d1f; } }
 #pgs-panel .pgs-menu-item {
   display: block; width: 100%; text-align: left; appearance: none; border: none; cursor: pointer;
@@ -256,7 +258,6 @@
 #pgs-panel .pgs-head-right { display: flex; gap: 2px; }
 #pgs-panel.pgs-docked {
   border-radius: var(--zen-native-inner-radius, 10px); box-shadow: none; animation: none;
-  background: var(--pgs-bg); backdrop-filter: none;
 }
 #pgs-panel.pgs-docked .pgs-head { cursor: default; }
 #pgs-panel .pgs-win-btn { display: none; }
@@ -2281,5 +2282,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.51");
+  console.log("[page-summary] loaded v1.9.52");
 })();
