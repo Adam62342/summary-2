@@ -42,11 +42,13 @@
   // ---------- styles (embedded so script and CSS always match) ----------
   const CSS = `
 #pgs-panel {
-  --pgs-fg: var(--toolbar-color, CanvasText);
-  --pgs-bg: var(--arrowpanel-background, var(--toolbar-bgcolor, Canvas));
+  /* fixed colors — never taken from the Zen theme, which tints them per space (an orange space
+     turned the accent an unreadable brown). Dark-mode values are set further down. */
+  --pgs-fg: #1d1d1f;
+  --pgs-bg: #ffffff;
   --pgs-line: color-mix(in srgb, var(--pgs-fg) 11%, transparent);
   --pgs-soft: color-mix(in srgb, var(--pgs-fg) 7%, transparent);
-  --pgs-accent: var(--zen-primary-color, #6c8cff);
+  --pgs-accent: #0a66d6;
   --pgs-ease: cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
   z-index: 2147483000;
@@ -227,6 +229,7 @@
    attached cards behind it never show through */
 #pgs-panel .pgs-menu-mention { backdrop-filter: none; -webkit-backdrop-filter: none; background: #ffffff; }
 @media (prefers-color-scheme: dark) {
+  #pgs-panel { --pgs-fg: #f5f5f7; --pgs-bg: #1d1d1f; --pgs-accent: #6ea8ff; }
   #pgs-panel, #pgs-panel .pgs-menu { background: #1d1d1f; }
 }
 @media (prefers-color-scheme: dark) { #pgs-panel .pgs-menu-mention { background: #1d1d1f; } }
@@ -2282,5 +2285,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.52");
+  console.log("[page-summary] loaded v1.9.53");
 })();
