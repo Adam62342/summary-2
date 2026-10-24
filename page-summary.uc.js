@@ -378,6 +378,8 @@
     (IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey);
 
   window.__pageSummary?.destroy();
+  // drop any chat windows a previous copy of the script left behind (e.g. when Sine reloads the mod)
+  for (const p of document.querySelectorAll("#pgs-panel")) p.remove();
 
   // ---------- prefs ----------
   const pref = (k, d) => {
@@ -1468,6 +1470,10 @@
     // remove one half of a split, so the UX stays consistent.
     function attachSplitTabs() {
       const others = splitSiblings().slice(0, 3);
+      // the split is ONE chat: close any separate chat a sibling pane already had, or both would show
+      for (const t of others) {
+        for (const o of [...sessions.values()]) if (o !== self && o.has(t)) o.close(true);
+      }
       members = [src, ...others]; // chat now spans these tabs: stays visible across them, no 2nd chat
       position(); // re-anchor over the whole split, not just the active pane
       return Promise.all(others.map((t) => addTab(t, true)));
@@ -2091,7 +2097,11 @@
       const sel = gBrowser.selectedTab;
       // stay visible while ANY tab of the split is active (so focusing the other half doesn't hide
       // the chat and can't spawn a second one), and while the panes are actually on screen
-      const want = !userHidden && (host === src ? (isMember(sel) && paneVisible(host)) : dockedVisible());
+      // only ONE floating chat per tab: if two sessions claim the selected tab, the one ⌘E acts on
+      // (current()) is the only one shown, so duplicates can never stack on screen
+      const want = !userHidden && (host === src
+        ? (isMember(sel) && paneVisible(host) && current() === self)
+        : dockedVisible());
       const wasHidden = panel.hidden;
       panel.hidden = !want;
       if (want) {
@@ -2209,13 +2219,19 @@
     const url = pageUrl();
     if (!url) return;
     const tab = gBrowser.selectedTab;
+    // never stack a second chat on a tab: reuse one already keyed to it, even if current() missed it
+    const existing = sessions.get(tab);
+    if (existing) return existing.visible ? existing.dismiss() : existing.restore();
     const ns = makeSession(tab);
     sessions.set(tab, ns);
     ns.open();
   }
 
   const onKey = (e) => {
-    if (isToggleKey(e)) { e.preventDefault(); e.stopPropagation(); toggle(); }
+    if (isToggleKey(e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat) toggle(); // holding ⌘E auto-repeats — only act on the first press
+    }
     else if (e.key === "Escape" && e.target?.closest?.("#pgs-panel")) { const c = current(); if (c && !c.docked) c.dismiss(); }
   };
   const syncAll = () => sessions.forEach((x) => x.sync());
@@ -2285,5 +2301,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.53");
+  console.log("[page-summary] loaded v1.9.54");
 })();
