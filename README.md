@@ -17,11 +17,11 @@ the current tab.
     attached as a card, so you can compare or cross-reference pages ("how does this differ from that
     one?"). Type **@** in the box to open the tab picker and keep typing to filter it.
   - **Pasted text** — drop whatever's on your clipboard in as a card.
-  - **This moment** (on YouTube) — grabs the transcript around the current playback position, so you
-    can ask about just the part you're watching.
 
   The pile fans out on hover and each card has a ✕ to remove it. Whatever's attached when you send
-  travels into your message. Up to five cards at a time.
+  travels into your message. Up to five cards at a time. If you open the panel on top of a **split
+  view**, the whole split becomes one chat: it floats over both panes, stays visible whichever half
+  you click, and attaches every pane as a card (so ⌘E grabs the split as a single environment).
 - **YouTube video summaries.** On a video, it reads the video's own transcript instead of the page
   chrome. It opens YouTube's "Show transcript" panel and scrapes it directly, so it works regardless
   of interface language and without caption APIs. Works on watch pages, Shorts, and youtu.be links.
