@@ -378,6 +378,11 @@
     (IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey);
 
   window.__pageSummary?.destroy();
+  // Each load of the script in this window gets a number; only the newest copy may act. If an older
+  // copy never finished starting up (so the destroy() above couldn't reach it), its ⌘E listener
+  // still checks this number and does nothing — so one ⌘E can never open two chat windows.
+  const COPY = (window.__pageSummaryCopy = (window.__pageSummaryCopy || 0) + 1);
+  const stale = () => window.__pageSummaryCopy !== COPY;
   // drop any chat windows a previous copy of the script left behind (e.g. when Sine reloads the mod)
   for (const p of document.querySelectorAll("#pgs-panel")) p.remove();
 
@@ -2210,6 +2215,7 @@
   };
 
   function toggle() {
+    if (stale()) return; // an older copy — the newest one handles ⌘E
     const s = current();
     if (s) return s.visible ? s.dismiss() : s.restore(); // dismissed chats come back as they were
     const url = pageUrl();
@@ -2224,6 +2230,7 @@
   }
 
   const onKey = (e) => {
+    if (stale()) return; // a newer copy of the script took over this window
     if (isToggleKey(e)) {
       e.preventDefault(); e.stopPropagation();
       if (!e.repeat) toggle(); // holding ⌘E auto-repeats — only act on the first press
@@ -2269,18 +2276,21 @@
   const onTabAttr = (e) => { for (const x of [...sessions.values()]) if (x.src === e.target) x.refreshAttach(); };
   gBrowser.tabContainer.addEventListener("TabAttrModified", onTabAttr);
 
-  // toolbar button (created once per session, shared across windows)
-  const { CustomizableUI } = ChromeUtils.importESModule("resource:///modules/CustomizableUI.sys.mjs");
-  if (!CustomizableUI.getWidget(ID)?.provider) {
-    CustomizableUI.createWidget({
-      id: ID,
-      type: "button",
-      label: "Summarize page",
-      tooltiptext: `Summarize this page (${SHORTCUT})`,
-      defaultArea: CustomizableUI.AREA_NAVBAR,
-      onCommand(e) { e.target.ownerGlobal.__pageSummary?.toggle(); },
-    });
-  }
+  // toolbar button (created once per session, shared across windows). Guarded: if this throws during
+  // startup, the cleanup handler below must still be registered, or a later copy can't replace us.
+  try {
+    const { CustomizableUI } = ChromeUtils.importESModule("resource:///modules/CustomizableUI.sys.mjs");
+    if (!CustomizableUI.getWidget(ID)?.provider) {
+      CustomizableUI.createWidget({
+        id: ID,
+        type: "button",
+        label: "Summarize page",
+        tooltiptext: `Summarize this page (${SHORTCUT})`,
+        defaultArea: CustomizableUI.AREA_NAVBAR,
+        onCommand(e) { e.target.ownerGlobal.__pageSummary?.toggle(); },
+      });
+    }
+  } catch (e) { console.warn("[page-summary] toolbar button", e); }
 
   window.__pageSummary = {
     toggle,
@@ -2297,5 +2307,5 @@
       delete window.__pageSummary;
     },
   };
-  console.log("[page-summary] loaded v1.9.55");
+  console.log(`[page-summary] loaded v1.9.56 (copy #${COPY} in this window${COPY > 1 ? " — older copies disabled" : ""})`);
 })();
